@@ -30,16 +30,16 @@ const (
 //
 // To avoid matching rig-level mayor directories, we continue searching
 // upward after finding a secondary marker, preferring primary matches.
+//
+// Note: This function does NOT resolve symlinks in the path. This is intentional
+// to ensure consistency with os.Getwd() which also returns symlink paths.
+// On macOS, /tmp is a symlink to /private/tmp - if we resolved symlinks here
+// but callers use os.Getwd(), filepath.Rel() would fail because the paths
+// would have different roots (/private/tmp vs /tmp).
 func Find(startDir string) (string, error) {
-	// Resolve to absolute path and follow symlinks
 	absDir, err := filepath.Abs(startDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving path: %w", err)
-	}
-
-	absDir, err = filepath.EvalSymlinks(absDir)
-	if err != nil {
-		return "", fmt.Errorf("evaluating symlinks: %w", err)
 	}
 
 	// Track the first secondary match in case no primary is found

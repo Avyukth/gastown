@@ -143,8 +143,7 @@ func TestIsWorkspace(t *testing.T) {
 	}
 }
 
-func TestFindFollowsSymlinks(t *testing.T) {
-	// Create workspace
+func TestFindFromSymlinkedDir(t *testing.T) {
 	root := realPath(t, t.TempDir())
 	mayorDir := filepath.Join(root, "mayor")
 	if err := os.MkdirAll(mayorDir, 0755); err != nil {
@@ -155,7 +154,6 @@ func TestFindFollowsSymlinks(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	// Create a symlinked directory
 	linkTarget := filepath.Join(root, "actual")
 	if err := os.MkdirAll(linkTarget, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -166,12 +164,56 @@ func TestFindFollowsSymlinks(t *testing.T) {
 		t.Skipf("symlink not supported: %v", err)
 	}
 
-	// Find from symlinked dir should work
 	found, err := Find(linkName)
 	if err != nil {
 		t.Fatalf("Find: %v", err)
 	}
 	if found != root {
 		t.Errorf("Find = %q, want %q", found, root)
+	}
+}
+
+func TestFindPreservesSymlinkPath(t *testing.T) {
+	realRoot := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	symRoot := filepath.Join(t.TempDir(), "symlink-workspace")
+	if err := os.Symlink(resolved, symRoot); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+
+	mayorDir := filepath.Join(symRoot, "mayor")
+	if err := os.MkdirAll(mayorDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	townFile := filepath.Join(mayorDir, "town.json")
+	if err := os.WriteFile(townFile, []byte(`{}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	subdir := filepath.Join(symRoot, "rigs", "project", "polecats", "worker")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	townRoot, err := Find(subdir)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	if townRoot != symRoot {
+		t.Errorf("Find returned %q, want %q (symlink path preserved)", townRoot, symRoot)
+	}
+
+	relPath, err := filepath.Rel(townRoot, subdir)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+
+	if relPath != "rigs/project/polecats/worker" {
+		t.Errorf("Rel = %q, want 'rigs/project/polecats/worker'", relPath)
 	}
 }
