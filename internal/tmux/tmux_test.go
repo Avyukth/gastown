@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func hasTmux() bool {
@@ -302,5 +304,84 @@ func TestEnsureSessionFresh_IdempotentOnZombie(t *testing.T) {
 	}
 	if !has {
 		t.Error("expected session to exist after multiple EnsureSessionFresh calls")
+	}
+}
+
+func TestSetEnvironment_GTRole(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-role-" + t.Name()
+	_ = tm.KillSession(sessionName)
+
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	tests := []struct {
+		name string
+		role string
+	}{
+		{constants.RolePolecat, constants.RolePolecat},
+		{constants.RoleCrew, constants.RoleCrew},
+		{constants.RoleWitness, constants.RoleWitness},
+		{constants.RoleRefinery, constants.RoleRefinery},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tm.SetEnvironment(sessionName, "GT_ROLE", tt.role); err != nil {
+				t.Fatalf("SetEnvironment GT_ROLE=%s: %v", tt.role, err)
+			}
+
+			got, err := tm.GetEnvironment(sessionName, "GT_ROLE")
+			if err != nil {
+				t.Fatalf("GetEnvironment GT_ROLE: %v", err)
+			}
+
+			if got != tt.role {
+				t.Errorf("GT_ROLE = %q, want %q", got, tt.role)
+			}
+		})
+	}
+}
+
+func TestSetEnvironment_MultipleVars(t *testing.T) {
+	if !hasTmux() {
+		t.Skip("tmux not installed")
+	}
+
+	tm := NewTmux()
+	sessionName := "gt-test-env-multi-" + t.Name()
+	_ = tm.KillSession(sessionName)
+
+	if err := tm.NewSession(sessionName, ""); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer func() { _ = tm.KillSession(sessionName) }()
+
+	envVars := map[string]string{
+		"GT_ROLE":    constants.RolePolecat,
+		"GT_RIG":     "gastown",
+		"GT_POLECAT": "Toast",
+	}
+
+	for key, value := range envVars {
+		if err := tm.SetEnvironment(sessionName, key, value); err != nil {
+			t.Fatalf("SetEnvironment %s=%s: %v", key, value, err)
+		}
+	}
+
+	for key, want := range envVars {
+		got, err := tm.GetEnvironment(sessionName, key)
+		if err != nil {
+			t.Fatalf("GetEnvironment %s: %v", key, err)
+		}
+		if got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }

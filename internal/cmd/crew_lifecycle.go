@@ -182,6 +182,7 @@ func runCrewRefresh(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set environment (non-fatal: session works without these)
+	_ = t.SetEnvironment(sessionID, "GT_ROLE", constants.RoleCrew)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", r.Name)
 	_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 

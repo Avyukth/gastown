@@ -786,6 +786,7 @@ func runStartCrew(cmd *cobra.Command, args []string) error {
 		}
 
 		// Set environment (non-fatal: session works without these)
+		_ = t.SetEnvironment(sessionID, "GT_ROLE", constants.RoleCrew)
 		_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
 		_ = t.SetEnvironment(sessionID, "GT_CREW", name)
 
@@ -932,6 +933,7 @@ func startCrewMember(rigName, crewName, townRoot string) error {
 	}
 
 	// Set environment (non-fatal: session works without these)
+	_ = t.SetEnvironment(sessionID, "GT_ROLE", constants.RoleCrew)
 	_ = t.SetEnvironment(sessionID, "GT_RIG", rigName)
 	_ = t.SetEnvironment(sessionID, "GT_CREW", crewName)
 

@@ -139,6 +139,8 @@ func (m *Manager) Start(polecat string, opts StartOptions) error {
 	}
 
 	// Set environment (non-fatal: session works without these)
+	// GT_ROLE is critical for new panes/windows opened when humans attach to debug
+	_ = m.tmux.SetEnvironment(sessionID, "GT_ROLE", constants.RolePolecat)
 	_ = m.tmux.SetEnvironment(sessionID, "GT_RIG", m.rig.Name)
 	_ = m.tmux.SetEnvironment(sessionID, "GT_POLECAT", polecat)
 
