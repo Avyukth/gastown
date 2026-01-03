@@ -27,20 +27,9 @@ const (
 )
 
 // Find locates the town root by walking up from the given directory.
-// It looks for mayor/town.json (primary marker) or mayor/ directory (secondary marker).
-//
-// To avoid matching rig-level mayor directories, we continue searching
-// upward after finding a secondary marker, preferring primary matches.
-//
-// When the start directory is inside a worktree (polecats/ or crew/), we continue
-// walking up even after finding a primary marker, because the worktree itself may
-// contain mayor/town.json from a rig that is also a gastown workspace.
-//
-// Note: This function does NOT resolve symlinks in the path. This is intentional
-// to ensure consistency with os.Getwd() which also returns symlink paths.
-// On macOS, /tmp is a symlink to /private/tmp - if we resolved symlinks here
-// but callers use os.Getwd(), filepath.Rel() would fail because the paths
-// would have different roots (/private/tmp vs /tmp).
+// It prefers mayor/town.json over mayor/ directory as workspace marker.
+// When in a worktree path (polecats/ or crew/), continues to outermost workspace.
+// Does not resolve symlinks to stay consistent with os.Getwd().
 func Find(startDir string) (string, error) {
 	absDir, err := filepath.Abs(startDir)
 	if err != nil {
@@ -48,28 +37,19 @@ func Find(startDir string) (string, error) {
 	}
 
 	inWorktree := isInWorktreePath(absDir)
-
-	var primaryMatch string
-	var secondaryMatch string
+	var primaryMatch, secondaryMatch string
 
 	current := absDir
 	for {
-		primaryPath := filepath.Join(current, PrimaryMarker)
-		if _, err := os.Stat(primaryPath); err == nil {
+		if _, err := os.Stat(filepath.Join(current, PrimaryMarker)); err == nil {
 			if !inWorktree {
 				return current, nil
 			}
-			if primaryMatch == "" {
-				primaryMatch = current
-			} else {
-				primaryMatch = current
-			}
+			primaryMatch = current
 		}
 
 		if secondaryMatch == "" {
-			secondaryPath := filepath.Join(current, SecondaryMarker)
-			info, err := os.Stat(secondaryPath)
-			if err == nil && info.IsDir() {
+			if info, err := os.Stat(filepath.Join(current, SecondaryMarker)); err == nil && info.IsDir() {
 				secondaryMatch = current
 			}
 		}
