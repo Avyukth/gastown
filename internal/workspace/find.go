@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/steveyegge/gastown/internal/config"
 )
@@ -31,6 +32,10 @@ const (
 // To avoid matching rig-level mayor directories, we continue searching
 // upward after finding a secondary marker, preferring primary matches.
 //
+// When the start directory is inside a worktree (polecats/ or crew/), we continue
+// walking up even after finding a primary marker, because the worktree itself may
+// contain mayor/town.json from a rig that is also a gastown workspace.
+//
 // Note: This function does NOT resolve symlinks in the path. This is intentional
 // to ensure consistency with os.Getwd() which also returns symlink paths.
 // On macOS, /tmp is a symlink to /private/tmp - if we resolved symlinks here
@@ -42,20 +47,25 @@ func Find(startDir string) (string, error) {
 		return "", fmt.Errorf("resolving path: %w", err)
 	}
 
-	// Track the first secondary match in case no primary is found
+	inWorktree := isInWorktreePath(absDir)
+
+	var primaryMatch string
 	var secondaryMatch string
 
-	// Walk up the directory tree
 	current := absDir
 	for {
-		// Check for primary marker (mayor/town.json)
 		primaryPath := filepath.Join(current, PrimaryMarker)
 		if _, err := os.Stat(primaryPath); err == nil {
-			return current, nil
+			if !inWorktree {
+				return current, nil
+			}
+			if primaryMatch == "" {
+				primaryMatch = current
+			} else {
+				primaryMatch = current
+			}
 		}
 
-		// Check for secondary marker (mayor/ directory)
-		// Don't return immediately - continue searching for primary markers
 		if secondaryMatch == "" {
 			secondaryPath := filepath.Join(current, SecondaryMarker)
 			info, err := os.Stat(secondaryPath)
@@ -64,14 +74,20 @@ func Find(startDir string) (string, error) {
 			}
 		}
 
-		// Move to parent directory
 		parent := filepath.Dir(current)
 		if parent == current {
-			// Reached filesystem root - return secondary match if found
+			if primaryMatch != "" {
+				return primaryMatch, nil
+			}
 			return secondaryMatch, nil
 		}
 		current = parent
 	}
+}
+
+func isInWorktreePath(path string) bool {
+	sep := string(filepath.Separator)
+	return strings.Contains(path, sep+"polecats"+sep) || strings.Contains(path, sep+"crew"+sep)
 }
 
 // FindOrError is like Find but returns a user-friendly error if not found.

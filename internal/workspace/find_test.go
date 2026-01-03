@@ -217,3 +217,64 @@ func TestFindPreservesSymlinkPath(t *testing.T) {
 		t.Errorf("Rel = %q, want 'rigs/project/polecats/worker'", relPath)
 	}
 }
+
+func TestFindSkipsNestedWorkspaceInWorktree(t *testing.T) {
+	root := realPath(t, t.TempDir())
+
+	if err := os.MkdirAll(filepath.Join(root, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mayor", "town.json"), []byte(`{"name":"outer"}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	polecatDir := filepath.Join(root, "myrig", "polecats", "worker")
+	if err := os.MkdirAll(filepath.Join(polecatDir, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(polecatDir, "mayor", "town.json"), []byte(`{"name":"inner"}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	found, err := Find(polecatDir)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	if found != root {
+		t.Errorf("Find = %q, want %q (should skip nested workspace in polecats/)", found, root)
+	}
+
+	rel, _ := filepath.Rel(found, polecatDir)
+	if rel != "myrig/polecats/worker" {
+		t.Errorf("Rel = %q, want 'myrig/polecats/worker'", rel)
+	}
+}
+
+func TestFindSkipsNestedWorkspaceInCrew(t *testing.T) {
+	root := realPath(t, t.TempDir())
+
+	if err := os.MkdirAll(filepath.Join(root, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "mayor", "town.json"), []byte(`{"name":"outer"}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	crewDir := filepath.Join(root, "myrig", "crew", "worker")
+	if err := os.MkdirAll(filepath.Join(crewDir, "mayor"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(crewDir, "mayor", "town.json"), []byte(`{"name":"inner"}`), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	found, err := Find(crewDir)
+	if err != nil {
+		t.Fatalf("Find: %v", err)
+	}
+
+	if found != root {
+		t.Errorf("Find = %q, want %q (should skip nested workspace in crew/)", found, root)
+	}
+}
