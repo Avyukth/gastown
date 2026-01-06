@@ -135,6 +135,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 }
 
 func runStatusWatch(cmd *cobra.Command, args []string) error {
+	if statusInterval <= 0 {
+		return fmt.Errorf("interval must be positive, got %d", statusInterval)
+	}
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
