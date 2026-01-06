@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 var (
@@ -370,7 +372,7 @@ func NewMayorConfig() *MayorConfig {
 
 // DaemonPatrolConfigPath returns the path to the daemon patrol config file.
 func DaemonPatrolConfigPath(townRoot string) string {
-	return filepath.Join(townRoot, "mayor", DaemonPatrolConfigFileName)
+	return filepath.Join(townRoot, constants.DirMayor, DaemonPatrolConfigFileName)
 }
 
 // LoadDaemonPatrolConfig loads and validates a daemon patrol config file.
