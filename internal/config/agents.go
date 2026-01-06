@@ -71,6 +71,11 @@ type AgentPresetInfo struct {
 
 	// NonInteractive contains settings for non-interactive mode.
 	NonInteractive *NonInteractiveConfig `json:"non_interactive,omitempty"`
+
+	// AutonomousModeEnv contains environment variables required for autonomous mode.
+	// Some agents (like OpenCode) require env vars instead of CLI flags for YOLO mode.
+	// These are injected into polecat sessions at startup.
+	AutonomousModeEnv map[string]string `json:"autonomous_mode_env,omitempty"`
 }
 
 // NonInteractiveConfig contains settings for running agents non-interactively.
@@ -151,6 +156,9 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
 			OutputFlag: "--format json",
+		},
+		AutonomousModeEnv: map[string]string{
+			"OPENCODE_PERMISSION": `{"*":"allow"}`,
 		},
 	},
 }
@@ -330,6 +338,17 @@ func GetSessionIDEnvVar(agentName string) string {
 		return ""
 	}
 	return info.SessionIDEnv
+}
+
+// GetAutonomousModeEnv returns the environment variables required for autonomous mode.
+// Some agents (like OpenCode) use env vars instead of CLI flags for YOLO mode.
+// Returns nil if the agent has no autonomous mode env vars.
+func GetAutonomousModeEnv(agentName string) map[string]string {
+	info := GetAgentPresetByName(agentName)
+	if info == nil {
+		return nil
+	}
+	return info.AutonomousModeEnv
 }
 
 // MergeWithPreset applies preset defaults to a RuntimeConfig.

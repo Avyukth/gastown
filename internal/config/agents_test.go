@@ -372,4 +372,46 @@ func TestOpenCodeNonInteractiveConfig(t *testing.T) {
 	if info.ResumeStyle != "flag" {
 		t.Errorf("expected resume style 'flag', got %q", info.ResumeStyle)
 	}
+
+	if info.AutonomousModeEnv == nil {
+		t.Fatal("OpenCode should have AutonomousModeEnv")
+	}
+
+	permission, ok := info.AutonomousModeEnv["OPENCODE_PERMISSION"]
+	if !ok {
+		t.Error("OpenCode should have OPENCODE_PERMISSION in AutonomousModeEnv")
+	}
+	if permission != `{"*":"allow"}` {
+		t.Errorf("expected OPENCODE_PERMISSION to be '{\"*\":\"allow\"}', got %q", permission)
+	}
+}
+
+func TestGetAutonomousModeEnv(t *testing.T) {
+	tests := []struct {
+		agentName string
+		wantNil   bool
+		wantKey   string
+	}{
+		{"claude", true, ""},
+		{"gemini", true, ""},
+		{"codex", true, ""},
+		{"opencode", false, "OPENCODE_PERMISSION"},
+		{"unknown", true, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agentName, func(t *testing.T) {
+			got := GetAutonomousModeEnv(tt.agentName)
+			if tt.wantNil && got != nil {
+				t.Errorf("GetAutonomousModeEnv(%s) = %v, want nil", tt.agentName, got)
+			}
+			if !tt.wantNil {
+				if got == nil {
+					t.Errorf("GetAutonomousModeEnv(%s) = nil, want map", tt.agentName)
+				} else if _, ok := got[tt.wantKey]; !ok {
+					t.Errorf("GetAutonomousModeEnv(%s) missing key %q", tt.agentName, tt.wantKey)
+				}
+			}
+		})
+	}
 }

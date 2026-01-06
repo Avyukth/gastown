@@ -765,6 +765,33 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 	return lookupAgentConfig(agentName, townSettings)
 }
 
+// ResolveAgentName returns the agent name that would be used for a rig.
+// Uses the same resolution logic as ResolveAgentConfig.
+func ResolveAgentName(townRoot, rigPath string) string {
+	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+	if err != nil {
+		rigSettings = nil
+	}
+
+	if rigSettings != nil && rigSettings.Runtime != nil {
+		return "claude"
+	}
+
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+
+	if rigSettings != nil && rigSettings.Agent != "" {
+		return rigSettings.Agent
+	} else if townSettings.DefaultAgent != "" {
+		return townSettings.DefaultAgent
+	}
+	return "claude"
+}
+
 // lookupAgentConfig looks up an agent by name.
 // First checks town's custom agents, then built-in presets from agents.go.
 func lookupAgentConfig(name string, townSettings *TownSettings) *RuntimeConfig {
@@ -870,17 +897,27 @@ func findTownRootFromCwd() (string, error) {
 // prompt is optional - if provided, appended as the initial prompt.
 func BuildStartupCommand(envVars map[string]string, rigPath, prompt string) string {
 	var rc *RuntimeConfig
+	var agentName string
 	if rigPath != "" {
-		// Derive town root from rig path
 		townRoot := filepath.Dir(rigPath)
 		rc = ResolveAgentConfig(townRoot, rigPath)
+		agentName = ResolveAgentName(townRoot, rigPath)
 	} else {
-		// Try to detect town root from cwd for town-level agents (mayor, deacon)
 		townRoot, err := findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
+			agentName = "claude"
 		} else {
 			rc = ResolveAgentConfig(townRoot, "")
+			agentName = ResolveAgentName(townRoot, "")
+		}
+	}
+
+	if autonomousEnv := GetAutonomousModeEnv(agentName); autonomousEnv != nil {
+		for k, v := range autonomousEnv {
+			if _, exists := envVars[k]; !exists {
+				envVars[k] = v
+			}
 		}
 	}
 
