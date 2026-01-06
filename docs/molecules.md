@@ -154,9 +154,82 @@ gt mol squash                # Squash attached molecule
 gt mol step done <step>      # Complete a molecule step
 ```
 
+## Worker → Reviewer Pattern
+
+For higher quality assurance, use the two-phase review pattern where work is
+verified by a fresh agent context before submission to the merge queue.
+
+### Why Fresh Context Review?
+
+| Same-Context Self-Review | Fresh-Context Review |
+|--------------------------|----------------------|
+| Implementer blind spots persist | Fresh eyes catch missed issues |
+| Context pollution from debugging | Clean analysis without baggage |
+| "It works for me" bias | Objective verification |
+| Single perspective | Separation of concerns |
+
+### Pattern Overview
+
+```
+┌──────────────┐   handoff    ┌──────────────┐   gt done    ┌──────────────┐
+│    WORKER    │ ───────────► │   REVIEWER   │ ───────────► │   REFINERY   │
+│   (impl)     │   TASK_ID    │ (fresh ctx)  │              │   (merge)    │
+└──────────────┘              └──────────────┘              └──────────────┘
+```
+
+### Using the Review Pattern
+
+**Option 1: Standalone Review Molecule**
+
+Worker completes implementation, then requests fresh-context review:
+```bash
+# Worker finishes implementation
+git push origin feature-branch
+gt mail send <rig>/witness -s "REVIEW_REQUEST: gt-xyz" \
+  -m "Ready for fresh-context review. Branch: feature-branch, Commit: abc123"
+
+# Witness spawns fresh polecat with review molecule
+bd mol pour mol-polecat-review --var task_id=gt-xyz --var commit=abc123
+```
+
+**Option 2: Compose Review Gate into Existing Workflow**
+
+Add review-gate aspect to your formula:
+```toml
+extends = ["shiny"]
+[compose]
+[[compose.expand]]
+target = "review"
+with = "review-gate"
+```
+
+### Review Molecule Steps
+
+1. **load-review-context** - Load branch and understand scope
+2. **verify-commit-discipline** - Check commit quality
+3. **scan-banned-patterns** - Language-specific anti-pattern detection
+4. **verify-test-quality** - Ensure meaningful tests
+5. **run-full-validation** - Execute test/lint suite
+6. **document-review-findings** - Record what was checked
+7. **submit-or-request-changes** - `gt done` or return to worker
+
+### Language Support
+
+The review molecule auto-detects project language:
+
+| Language | Test Command | Lint Command | Anti-Patterns Scanned |
+|----------|--------------|--------------|----------------------|
+| Go | `go test ./...` | `golangci-lint run` | `panic(`, ignored errors |
+| Rust | `cargo test` | `cargo clippy` | `todo!()`, `.unwrap()` |
+| Python | `pytest` | `ruff check` | bare `except:`, `pass` in except |
+| TypeScript | `npm test` | `eslint` | `as any`, `@ts-ignore` |
+
+For other languages, provide `test_cmd` and `lint_cmd` variables.
+
 ## Best Practices
 
 1. **Use `--continue` for propulsion** - Keep momentum by auto-advancing
 2. **Check progress with `bd mol current`** - Know where you are before resuming
 3. **Squash completed molecules** - Create digests for audit trail
 4. **Burn routine wisps** - Don't accumulate ephemeral patrol data
+5. **Use fresh-context review for critical work** - The reviewer catches what the worker misses

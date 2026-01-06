@@ -1,0 +1,407 @@
+description = """
+Fresh-context review phase for polecat work submissions.
+
+This molecule is assigned to a FRESH polecat context to review work completed
+by another polecat (the Worker). It implements the Reviewer phase of the
+Worker → Reviewer pattern, ensuring quality gates are verified by a separate
+agent with clean context.
+
+## Worker → Reviewer Pattern
+
+```
+┌──────────────┐   TASK_ID    ┌──────────────┐   gt done    ┌──────────────┐
+│    WORKER    │ ───────────► │   REVIEWER   │ ───────────► │   REFINERY   │
+│   (impl)     │   COMMIT     │ (fresh ctx)  │              │   (merge)    │
+└──────────────┘              └──────────────┘              └──────────────┘
+```
+
+## Why Fresh Context?
+
+- Worker context is polluted with implementation decisions
+- Fresh eyes catch issues the implementer is blind to
+- Separation of concerns: implement vs verify
+- Matches human code review patterns
+
+## Variables
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| task_id | handoff | The bead ID of the work being reviewed |
+| commit | handoff | The commit SHA marking end of worker phase |
+| branch | derived | The branch containing the work |
+| test_cmd | config | Test command (default: auto-detect) |
+| lint_cmd | config | Lint command (default: auto-detect) |
+
+## Language Detection
+
+The reviewer auto-detects the project language and applies appropriate checks:
+- **Go**: go test, golangci-lint
+- **Rust**: cargo test, cargo clippy
+- **Python**: pytest, ruff/flake8
+- **TypeScript/JavaScript**: npm test, eslint
+- **Generic**: User-provided commands via variables
+
+## Failure Modes
+
+| Situation | Action |
+|-----------|--------|
+| TDD pattern violated | Document violation, request worker fix OR fix directly |
+| Banned pattern found | Fix directly, commit as fix(review): |
+| Weak test found | Fix directly, commit as fix(review): |
+| Tests fail | Investigate: worker bug or pre-existing? Handle accordingly |
+| All checks pass | Proceed to gt done |"""
+formula = "mol-polecat-review"
+type = "molecule"
+version = 1
+
+[[steps]]
+id = "load-review-context"
+title = "Load review context and verify handoff"
+description = """
+Initialize review session and load the work to be reviewed.
+
+**1. Prime your environment:**
+```bash
+gt prime                    # Load role context
+bd prime                    # Load beads context
+```
+
+**2. Check your hook for review assignment:**
+```bash
+gt hook                     # Shows review assignment
+bd show {{task_id}}         # The work being reviewed
+```
+
+**3. Verify the branch and commit:**
+```bash
+git fetch origin
+git log --oneline {{commit}}^..{{commit}}  # Verify commit exists
+git checkout {{branch}}     # Switch to the branch
+git log --oneline origin/main..HEAD        # See all commits to review
+```
+
+**4. Understand scope:**
+```bash
+git diff --stat origin/main...HEAD         # Files changed
+git diff origin/main...HEAD                # Full diff
+```
+
+**Exit criteria:** You have the branch checked out and understand the scope of changes."""
+
+[[steps]]
+id = "verify-commit-discipline"
+title = "Verify commit discipline and message quality"
+needs = ["load-review-context"]
+description = """
+Check that commits follow good practices (NOT strictly TDD unless project requires it).
+
+**1. Review commit history:**
+```bash
+git log --oneline origin/main..HEAD
+```
+
+**2. Check for good commit discipline:**
+
+| Good Pattern | Red Flag |
+|--------------|----------|
+| Atomic commits (one logical change) | Giant "WIP" or "fix" commits |
+| Clear commit messages | "asdf", "stuff", "update" |
+| Type prefixes (feat/fix/refactor/test) | No context in message |
+| Issue reference where appropriate | Unrelated changes mixed |
+
+**3. For TDD projects (if configured), verify cycle:**
+```bash
+# Look for test → implementation → refactor pattern
+git log --oneline | head -20
+# Should see interleaved test/feat/refactor commits
+```
+
+**4. Document findings:**
+- Note any commit discipline issues
+- These are advisory unless project enforces strict TDD
+
+**Exit criteria:** Commit history reviewed, issues documented."""
+
+[[steps]]
+id = "scan-banned-patterns"
+title = "Scan for language-specific banned patterns"
+needs = ["verify-commit-discipline"]
+description = """
+Search for patterns that should not appear in production code.
+
+**Auto-detect language and scan:**
+
+The patterns below are examples. Adjust based on detected language.
+
+**For Rust projects:**
+```bash
+# Stubs that panic at runtime
+grep -rn "todo!()\|unimplemented!()\|panic!()" src/ --include="*.rs" || true
+
+# Lazy error handling
+grep -rn "\.unwrap()" src/ --include="*.rs" | grep -v "_test\|tests\|#\[test\]" || true
+
+# Dead code suppression
+grep -rn "#\[allow(dead_code)\]" src/ --include="*.rs" || true
+```
+
+**For Go projects:**
+```bash
+# Panic in production code
+grep -rn "panic(" --include="*.go" | grep -v "_test.go" || true
+
+# Ignored errors
+grep -rn "_ = \|_ :=" --include="*.go" | grep -v "_test.go" || true
+```
+
+**For Python projects:**
+```bash
+# Bare except clauses
+grep -rn "except:" --include="*.py" | grep -v "except:\s*#" || true
+
+# Pass in except blocks (swallowed errors)
+grep -rn -A1 "except" --include="*.py" | grep "pass" || true
+```
+
+**For TypeScript/JavaScript:**
+```bash
+# Type assertions that bypass safety
+grep -rn "as any\|@ts-ignore\|@ts-expect-error" --include="*.ts" --include="*.tsx" || true
+
+# Empty catch blocks
+grep -rn "catch.*{}" --include="*.ts" --include="*.js" || true
+```
+
+**Action on findings:**
+- **Critical (panic/crash paths):** Fix directly → `git commit -m "fix(review): remove panic in production path"`
+- **Minor (style):** Document for worker, don't block
+
+**Exit criteria:** Banned pattern scan complete, critical issues fixed."""
+
+[[steps]]
+id = "verify-test-quality"
+title = "Verify test quality and coverage"
+needs = ["scan-banned-patterns"]
+description = """
+Check that tests are meaningful, not just present.
+
+**1. Identify new/changed test files:**
+```bash
+git diff --name-only origin/main...HEAD | grep -E "test|spec|_test" || true
+```
+
+**2. Scan for weak test patterns:**
+
+**Generic weak assertions (all languages):**
+```bash
+# Tests that only check "not error" without verifying value
+grep -rn "assertNotNull\|assertNotNil\|!= nil\|!== null\|is not None" \
+  --include="*test*" --include="*spec*" || true
+```
+
+**Rust-specific:**
+```bash
+# Weak Result checks
+grep -rn "\.is_ok()\|\.is_some()\|\.is_err()" \
+  --include="*test*.rs" | grep "assert!" || true
+# Should use: assert_eq!(result, Ok(expected)) or matches!
+```
+
+**Go-specific:**
+```bash
+# Missing error checks in tests
+grep -rn "_, err :=\|err :=" --include="*_test.go" | grep -v "if err" || true
+```
+
+**3. Verify negative test coverage:**
+```bash
+# Look for error/failure/invalid test cases
+grep -rn "test.*error\|test.*fail\|test.*invalid\|test.*empty\|test.*nil\|test.*null" \
+  --include="*test*" --include="*spec*" -i || true
+```
+
+**4. If coverage tooling available:**
+```bash
+# Go
+go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1
+
+# Rust
+cargo llvm-cov --summary-only 2>/dev/null || cargo tarpaulin --out Stdout 2>/dev/null || true
+
+# Python
+pytest --cov --cov-report=term-missing 2>/dev/null || true
+
+# Node
+npm test -- --coverage 2>/dev/null || true
+```
+
+**Action on findings:**
+- Missing negative tests for new code: Add them → `git commit -m "fix(review): add negative test for X"`
+- Weak assertions: Strengthen them → `git commit -m "fix(review): strengthen assertion in X"`
+
+**Exit criteria:** Test quality verified, weak tests strengthened."""
+
+[[steps]]
+id = "run-full-validation"
+title = "Run full test and lint suite"
+needs = ["verify-test-quality"]
+description = """
+Execute the project's test and lint commands to ensure everything passes.
+
+**1. Detect and run test command:**
+```bash
+# Auto-detect based on project files
+if [ -f "Cargo.toml" ]; then
+    cargo test
+elif [ -f "go.mod" ]; then
+    go test ./...
+elif [ -f "package.json" ]; then
+    npm test
+elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+    pytest
+else
+    echo "Unknown project type - use {{test_cmd}} variable"
+    {{test_cmd}}
+fi
+```
+
+**2. Detect and run lint command:**
+```bash
+if [ -f "Cargo.toml" ]; then
+    cargo clippy -- -D warnings
+elif [ -f "go.mod" ]; then
+    golangci-lint run ./... || go vet ./...
+elif [ -f "package.json" ]; then
+    npm run lint 2>/dev/null || npx eslint . 2>/dev/null || true
+elif [ -f "pyproject.toml" ]; then
+    ruff check . 2>/dev/null || flake8 . 2>/dev/null || true
+else
+    {{lint_cmd}}
+fi
+```
+
+**3. Run formatter check (don't auto-fix):**
+```bash
+if [ -f "Cargo.toml" ]; then
+    cargo fmt -- --check
+elif [ -f "go.mod" ]; then
+    gofmt -l . | head -20
+elif [ -f "package.json" ]; then
+    npx prettier --check . 2>/dev/null || true
+fi
+```
+
+**4. Handle failures:**
+- Test failure caused by this PR: Fix it → `git commit -m "fix(review): ..."`
+- Pre-existing failure: Document, file bead, proceed
+- Lint warnings: Fix if trivial, document if complex
+
+**Exit criteria:** All tests pass, lint is clean (or issues documented)."""
+
+[[steps]]
+id = "document-review-findings"
+title = "Document review findings"
+needs = ["run-full-validation"]
+description = """
+Summarize what was reviewed and any actions taken.
+
+**Create review summary:**
+
+Document in the bead or as a comment:
+```
+## Review Summary for {{task_id}}
+
+### Commits Reviewed
+- <list commits from git log>
+
+### Checks Performed
+- [ ] Commit discipline verified
+- [ ] Banned patterns scanned
+- [ ] Test quality verified
+- [ ] Full test suite passed
+- [ ] Lint checks passed
+
+### Issues Found & Fixed
+- <list any fix(review): commits made>
+
+### Issues Deferred
+- <list any non-blocking issues for future>
+
+### Recommendation
+APPROVED / APPROVED WITH NOTES / REQUEST CHANGES
+```
+
+**Update the bead:**
+```bash
+bd update {{task_id}} --notes "Reviewed by fresh context. <summary>"
+```
+
+**Exit criteria:** Review findings documented."""
+
+[[steps]]
+id = "submit-or-request-changes"
+title = "Submit to merge queue or request changes"
+needs = ["document-review-findings"]
+description = """
+Final decision: approve and submit, or request worker changes.
+
+**Decision matrix:**
+
+| Condition | Action |
+|-----------|--------|
+| All checks pass, no issues | `gt done` - submit to refinery |
+| Minor issues fixed by reviewer | `gt done` - include review fixes |
+| Major issues requiring worker input | Mail worker, do NOT gt done |
+| Fundamental design problems | Escalate to witness/mayor |
+
+**If APPROVED:**
+```bash
+# Sync any review fixes
+bd sync
+
+# Submit to merge queue
+gt done
+```
+
+**If REQUEST CHANGES:**
+```bash
+# Document what needs to change
+gt mail send <rig>/polecats/<worker> -s "REVIEW: Changes requested for {{task_id}}" \
+  -m "Review complete. Please address:
+  
+  1. <issue>
+  2. <issue>
+  
+  After fixes, re-run: gt review-handoff"
+
+# Do NOT run gt done - work returns to worker
+```
+
+**If ESCALATE:**
+```bash
+gt mail send <rig>/witness -s "ESCALATE: Review concern for {{task_id}}" \
+  -m "Found issue requiring human/witness judgment: <description>"
+```
+
+**Exit criteria:** Work either submitted to merge queue or returned to worker."""
+
+[vars]
+[vars.task_id]
+description = "The bead ID of the work being reviewed"
+required = true
+
+[vars.commit]
+description = "The commit SHA marking end of worker phase"
+required = true
+
+[vars.branch]
+description = "The branch containing the work (derived from task)"
+required = false
+
+[vars.test_cmd]
+description = "Override: test command for unknown project types"
+required = false
+
+[vars.lint_cmd]
+description = "Override: lint command for unknown project types"
+required = false
