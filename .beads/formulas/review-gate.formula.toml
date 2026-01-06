@@ -1,0 +1,136 @@
+description = """
+Review gate aspect - composable quality verification steps.
+
+This aspect adds a structured review gate that can be composed into any workflow
+formula. It provides language-agnostic quality checks that run BEFORE submission.
+
+## Usage
+
+Compose into existing formulas:
+```toml
+extends = ["shiny"]
+[compose]
+[[compose.expand]]
+target = "review"
+with = "review-gate"
+```
+
+Or use standalone in a workflow:
+```toml
+[[steps]]
+id = "quality-gate"
+needs = ["implement"]
+aspect = "review-gate"
+```
+
+## Checks Performed
+
+1. **Commit Discipline** - Atomic commits, clear messages
+2. **Banned Patterns** - Language-specific anti-patterns
+3. **Test Quality** - Meaningful assertions, negative cases
+4. **Full Validation** - Test suite and linting
+
+## Language Support
+
+Auto-detects: Go, Rust, Python, TypeScript/JavaScript
+Configurable: Any language via test_cmd/lint_cmd variables
+"""
+formula = "review-gate"
+type = "aspect"
+version = 1
+
+[[steps]]
+id = "check-commit-discipline"
+title = "Verify commit discipline"
+description = """
+Review commits for good practices.
+
+```bash
+git log --oneline origin/main..HEAD
+```
+
+**Verify:**
+- Atomic commits (one logical change each)
+- Clear messages with context
+- No giant "WIP" or "stuff" commits
+
+**Advisory:** Document issues but don't block unless egregious."""
+
+[[steps]]
+id = "scan-anti-patterns"
+title = "Scan for anti-patterns"
+needs = ["check-commit-discipline"]
+description = """
+Search for language-specific patterns that indicate problems.
+
+**Auto-detect and scan based on project files.**
+
+Critical patterns to catch:
+- Runtime panics in production paths
+- Swallowed errors / ignored results
+- Type safety bypasses
+- Dead code suppressions
+
+**Action:** Fix critical issues directly with `fix(review):` commits."""
+
+[[steps]]
+id = "detect-wiring-gaps"
+title = "Detect installed-but-not-wired gaps"
+needs = ["scan-anti-patterns"]
+description = """
+Find cases where something was added but not actually connected.
+
+**Common wiring gaps:**
+- Dependency in manifest but never imported
+- Icon pack added but still using emoji strings
+- SDK added but old implementation remains
+- Config/env var added but never loaded
+
+**Quick detection:**
+```bash
+# New deps in this PR
+git diff origin/main...HEAD -- "go.mod" "Cargo.toml" "package.json" | grep "^+" || true
+
+# For each, verify it's imported/used in the codebase
+# If not: WIRING GAP - added but not connected
+```
+
+**Action:** Ask worker about unused deps. Fix migration gaps directly."""
+
+[[steps]]
+id = "verify-tests"
+title = "Verify test quality"
+needs = ["detect-wiring-gaps"]
+description = """
+Ensure tests are meaningful, not just present.
+
+**Check for:**
+- Weak assertions (only checking "not null/nil/error")
+- Missing negative test cases
+- New code without corresponding tests
+
+**Action:** Add missing tests or strengthen weak ones."""
+
+[[steps]]
+id = "run-validation"
+title = "Run full validation"
+needs = ["verify-tests"]
+description = """
+Execute test and lint commands.
+
+```bash
+# Auto-detect or use provided commands
+{{test_cmd | default: "auto-detect"}}
+{{lint_cmd | default: "auto-detect"}}
+```
+
+**Exit criteria:** Tests pass, lint clean."""
+
+[vars]
+[vars.test_cmd]
+description = "Test command override"
+required = false
+
+[vars.lint_cmd]
+description = "Lint command override"
+required = false
