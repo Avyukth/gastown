@@ -165,6 +165,27 @@ The `gt done --exit` command:
 - Exits your session immediately (no idle waiting)
 - Witness handles cleanup, Refinery merges your branch
 
+### Fresh-Context Review (Optional)
+
+For important changes, request a fresh-context code review before merge:
+
+```bash
+gt done --review                  # Light review (gate preset)
+gt done --review --preset=full    # Comprehensive 10-leg review
+```
+
+This cycles your session and respawns with a **fresh Claude context** that has
+NO memory of your implementation decisions. The fresh context runs the code-review
+formula, catching issues that implementation bias might miss.
+
+**Flow:**
+1. `gt done --review` → pins code-review formula to hook
+2. Session cycles → fresh context spawns
+3. Fresh context runs `gt prime` → sees review task on hook
+4. Runs code-review with no implementation bias
+5. If APPROVED → `gt done` to submit to merge queue
+6. If ISSUES → fixes and re-reviews
+
 ### The Landing Rule
 
 > **Work is NOT landed until it's on `main` OR in the Refinery MQ.**

@@ -106,9 +106,63 @@ func HandlePolecatDone(workDir, rigName string, msg *mail.Message) *HandlerResul
 	return result
 }
 
-// HandleLifecycleShutdown processes a LIFECYCLE:Shutdown message.
-// Similar to POLECAT_DONE but triggered by daemon rather than polecat.
-// Auto-nukes if clean since shutdown means no pending work.
+func HandleReviewCycle(workDir, rigName string, msg *mail.Message) *HandlerResult {
+	result := &HandlerResult{
+		MessageID:    msg.ID,
+		ProtocolType: ProtoReviewCycle,
+	}
+
+	payload, err := ParseReviewCycle(msg.Subject, msg.Body)
+	if err != nil {
+		result.Error = fmt.Errorf("parsing REVIEW_CYCLE: %w", err)
+		return result
+	}
+
+	sessionName := fmt.Sprintf("gt-%s-%s", rigName, payload.PolecatName)
+	t := tmux.NewTmux()
+
+	exists, err := t.HasSession(sessionName)
+	if err != nil {
+		result.Error = fmt.Errorf("checking session: %w", err)
+		return result
+	}
+
+	if !exists {
+		result.Error = fmt.Errorf("session %s not found", sessionName)
+		return result
+	}
+
+	townRoot, _ := workspace.Find(workDir)
+	polecatPath := filepath.Join(townRoot, rigName, "polecats", payload.PolecatName)
+
+	reviewPrompt := fmt.Sprintf(`gt prime
+
+REVIEW MODE: Fresh-context code review required.
+Branch: %s | Preset: %s
+Execute: gt formula run code-review --preset=%s --branch=%s
+After review: APPROVED → gt done | ISSUES → fix and retry`,
+		payload.Branch, payload.Preset, payload.Preset, payload.Branch)
+
+	restartCmd := fmt.Sprintf("cd %s && claude %q", polecatPath, reviewPrompt)
+
+	paneID, err := t.GetPaneID(sessionName)
+	if err != nil {
+		result.Error = fmt.Errorf("getting pane: %w", err)
+		return result
+	}
+
+	if err := t.RespawnPane(paneID, restartCmd); err != nil {
+		result.Error = fmt.Errorf("respawning session: %w", err)
+		return result
+	}
+
+	result.Handled = true
+	result.Action = fmt.Sprintf("respawned %s for fresh-context review (preset=%s, branch=%s)",
+		payload.PolecatName, payload.Preset, payload.Branch)
+
+	return result
+}
+
 func HandleLifecycleShutdown(workDir, rigName string, msg *mail.Message) *HandlerResult {
 	result := &HandlerResult{
 		MessageID:    msg.ID,

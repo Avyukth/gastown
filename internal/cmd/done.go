@@ -34,6 +34,12 @@ Exit statuses:
   ESCALATED      - Hit blocker, needs human intervention
   DEFERRED       - Work paused, issue still open
   PHASE_COMPLETE - Phase done, awaiting gate (use --phase-complete)
+  REVIEW_CYCLE   - Request fresh-context review before merge (use --review)
+
+Review workflow:
+  The --review flag triggers a fresh-context code review before submitting
+  to the merge queue. This cycles the session and runs the code-review formula
+  with a clean Claude context, catching issues the implementer missed.
 
 Phase handoff workflow:
   When a molecule has gate steps (async waits), use --phase-complete to signal
@@ -44,6 +50,8 @@ Phase handoff workflow:
 Examples:
   gt done                              # Submit branch, notify COMPLETED
   gt done --exit                       # Submit and exit Claude session
+  gt done --review                     # Fresh-context review before merge
+  gt done --review --preset=full       # Full 10-leg review
   gt done --issue gt-abc               # Explicit issue ID
   gt done --status ESCALATED           # Signal blocker, skip MR
   gt done --status DEFERRED            # Pause work, skip MR
@@ -58,14 +66,16 @@ var (
 	doneExit          bool
 	donePhaseComplete bool
 	doneGate          string
+	doneReview        bool
+	doneReviewPreset  string
 )
 
-// Valid exit types for gt done
 const (
 	ExitCompleted     = "COMPLETED"
 	ExitEscalated     = "ESCALATED"
 	ExitDeferred      = "DEFERRED"
 	ExitPhaseComplete = "PHASE_COMPLETE"
+	ExitReviewCycle   = "REVIEW_CYCLE"
 )
 
 func init() {
@@ -75,20 +85,22 @@ func init() {
 	doneCmd.Flags().BoolVar(&doneExit, "exit", false, "Exit Claude session after MR submission (self-terminate)")
 	doneCmd.Flags().BoolVar(&donePhaseComplete, "phase-complete", false, "Signal phase complete - await gate before continuing")
 	doneCmd.Flags().StringVar(&doneGate, "gate", "", "Gate bead ID to wait on (with --phase-complete)")
+	doneCmd.Flags().BoolVar(&doneReview, "review", false, "Request fresh-context code review before merge")
+	doneCmd.Flags().StringVar(&doneReviewPreset, "preset", "gate", "Review preset: gate (light), full (comprehensive), or custom leg list")
 
 	rootCmd.AddCommand(doneCmd)
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
-	// Handle --phase-complete flag (overrides --status)
 	var exitType string
-	if donePhaseComplete {
+	if doneReview {
+		exitType = ExitReviewCycle
+	} else if donePhaseComplete {
 		exitType = ExitPhaseComplete
 		if doneGate == "" {
 			return fmt.Errorf("--phase-complete requires --gate <gate-id>")
 		}
 	} else {
-		// Validate exit status
 		exitType = strings.ToUpper(doneStatus)
 		if exitType != ExitCompleted && exitType != ExitEscalated && exitType != ExitDeferred {
 			return fmt.Errorf("invalid exit status '%s': must be COMPLETED, ESCALATED, or DEFERRED", doneStatus)
@@ -272,7 +284,6 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("The Refinery will process your merge request."))
 	} else if exitType == ExitPhaseComplete {
-		// Phase complete - register as waiter on gate, then recycle
 		fmt.Printf("%s Phase complete, awaiting gate\n", style.Bold.Render("→"))
 		fmt.Printf("  Gate: %s\n", doneGate)
 		if issueID != "" {
@@ -282,13 +293,25 @@ func runDone(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 		fmt.Printf("%s\n", style.Dim.Render("Witness will dispatch new polecat when gate closes."))
 
-		// Register this polecat as a waiter on the gate
 		bd := beads.New(beads.ResolveBeadsDir(cwd))
 		if err := bd.AddGateWaiter(doneGate, sender); err != nil {
 			style.PrintWarning("could not register as gate waiter: %v", err)
 		} else {
 			fmt.Printf("%s Registered as waiter on gate %s\n", style.Bold.Render("✓"), doneGate)
 		}
+	} else if exitType == ExitReviewCycle {
+		commitSHA, _ := g.Rev("HEAD")
+
+		fmt.Printf("%s Requesting fresh-context review\n", style.Bold.Render("→"))
+		fmt.Printf("  Branch: %s\n", branch)
+		fmt.Printf("  Commit: %s\n", commitSHA)
+		fmt.Printf("  Preset: %s\n", doneReviewPreset)
+		if issueID != "" {
+			fmt.Printf("  Issue: %s\n", issueID)
+		}
+		fmt.Println()
+		fmt.Printf("%s\n", style.Dim.Render("Session will cycle. Fresh context will run code-review."))
+		fmt.Printf("%s\n", style.Dim.Render("Review with NO memory of implementation decisions."))
 	} else {
 		// For ESCALATED or DEFERRED, just print status
 		fmt.Printf("%s Signaling %s\n", style.Bold.Render("→"), exitType)
@@ -303,7 +326,6 @@ func runDone(cmd *cobra.Command, args []string) error {
 	townRouter := mail.NewRouter(townRoot)
 	witnessAddr := fmt.Sprintf("%s/witness", rigName)
 
-	// Build notification body
 	var bodyLines []string
 	bodyLines = append(bodyLines, fmt.Sprintf("Exit: %s", exitType))
 	if issueID != "" {
@@ -317,10 +339,23 @@ func runDone(cmd *cobra.Command, args []string) error {
 	}
 	bodyLines = append(bodyLines, fmt.Sprintf("Branch: %s", branch))
 
+	if exitType == ExitReviewCycle {
+		commitSHA, _ := g.Rev("HEAD")
+		bodyLines = append(bodyLines, fmt.Sprintf("Commit: %s", commitSHA))
+		bodyLines = append(bodyLines, fmt.Sprintf("Preset: %s", doneReviewPreset))
+	}
+
+	var subject string
+	if exitType == ExitReviewCycle {
+		subject = fmt.Sprintf("REVIEW_CYCLE %s", polecatName)
+	} else {
+		subject = fmt.Sprintf("POLECAT_DONE %s", polecatName)
+	}
+
 	doneNotification := &mail.Message{
 		To:      witnessAddr,
 		From:    sender,
-		Subject: fmt.Sprintf("POLECAT_DONE %s", polecatName),
+		Subject: subject,
 		Body:    strings.Join(bodyLines, "\n"),
 	}
 
@@ -395,7 +430,6 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		return
 	}
 
-	// Map exit type to agent state
 	var newState string
 	switch exitType {
 	case ExitCompleted:
@@ -406,6 +440,8 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 		newState = "idle"
 	case ExitPhaseComplete:
 		newState = "awaiting-gate"
+	case ExitReviewCycle:
+		newState = "review-pending"
 	default:
 		return
 	}
@@ -453,8 +489,6 @@ func updateAgentStateOnDone(cwd, townRoot, exitType, _ string) { // issueID unus
 	}
 }
 
-// getDispatcherFromBead retrieves the dispatcher agent ID from the bead's attachment fields.
-// Returns empty string if no dispatcher is recorded.
 func getDispatcherFromBead(cwd, issueID string) string {
 	if issueID == "" {
 		return ""

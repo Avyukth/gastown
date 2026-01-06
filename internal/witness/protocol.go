@@ -8,25 +8,14 @@ import (
 	"time"
 )
 
-// Protocol message patterns for Witness inbox routing.
 var (
-	// POLECAT_DONE <name> - polecat signaling work completion
-	PatternPolecatDone = regexp.MustCompile(`^POLECAT_DONE\s+(\S+)`)
-
-	// LIFECYCLE:Shutdown <name> - daemon-triggered polecat shutdown
+	PatternPolecatDone       = regexp.MustCompile(`^POLECAT_DONE\s+(\S+)`)
 	PatternLifecycleShutdown = regexp.MustCompile(`^LIFECYCLE:Shutdown\s+(\S+)`)
-
-	// HELP: <topic> - polecat requesting intervention
-	PatternHelp = regexp.MustCompile(`^HELP:\s+(.+)`)
-
-	// MERGED <name> - refinery confirms branch merged
-	PatternMerged = regexp.MustCompile(`^MERGED\s+(\S+)`)
-
-	// HANDOFF - session continuity message
-	PatternHandoff = regexp.MustCompile(`^🤝\s*HANDOFF`)
-
-	// SWARM_START - mayor initiating batch work
-	PatternSwarmStart = regexp.MustCompile(`^SWARM_START`)
+	PatternHelp              = regexp.MustCompile(`^HELP:\s+(.+)`)
+	PatternMerged            = regexp.MustCompile(`^MERGED\s+(\S+)`)
+	PatternHandoff           = regexp.MustCompile(`^🤝\s*HANDOFF`)
+	PatternSwarmStart        = regexp.MustCompile(`^SWARM_START`)
+	PatternReviewCycle       = regexp.MustCompile(`^REVIEW_CYCLE\s+(\S+)`)
 )
 
 // ProtocolType identifies the type of protocol message.
@@ -39,17 +28,25 @@ const (
 	ProtoMerged            ProtocolType = "merged"
 	ProtoHandoff           ProtocolType = "handoff"
 	ProtoSwarmStart        ProtocolType = "swarm_start"
+	ProtoReviewCycle       ProtocolType = "review_cycle"
 	ProtoUnknown           ProtocolType = "unknown"
 )
 
-// PolecatDonePayload contains parsed data from a POLECAT_DONE message.
 type PolecatDonePayload struct {
 	PolecatName string
-	Exit        string // COMPLETED, ESCALATED, DEFERRED, PHASE_COMPLETE
+	Exit        string
 	IssueID     string
 	MRID        string
 	Branch      string
-	Gate        string // Gate ID when Exit is PHASE_COMPLETE
+	Gate        string
+}
+
+type ReviewCyclePayload struct {
+	PolecatName string
+	Branch      string
+	Commit      string
+	Preset      string
+	IssueID     string
 }
 
 // HelpPayload contains parsed data from a HELP message.
@@ -78,11 +75,12 @@ type SwarmStartPayload struct {
 	StartedAt time.Time
 }
 
-// ClassifyMessage determines the protocol type from a message subject.
 func ClassifyMessage(subject string) ProtocolType {
 	switch {
 	case PatternPolecatDone.MatchString(subject):
 		return ProtoPolecatDone
+	case PatternReviewCycle.MatchString(subject):
+		return ProtoReviewCycle
 	case PatternLifecycleShutdown.MatchString(subject):
 		return ProtoLifecycleShutdown
 	case PatternHelp.MatchString(subject):
@@ -130,6 +128,33 @@ func ParsePolecatDone(subject, body string) (*PolecatDonePayload, error) {
 			payload.Gate = strings.TrimSpace(strings.TrimPrefix(line, "Gate:"))
 		} else if strings.HasPrefix(line, "Branch:") {
 			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		}
+	}
+
+	return payload, nil
+}
+
+func ParseReviewCycle(subject, body string) (*ReviewCyclePayload, error) {
+	matches := PatternReviewCycle.FindStringSubmatch(subject)
+	if len(matches) < 2 {
+		return nil, fmt.Errorf("invalid REVIEW_CYCLE subject: %s", subject)
+	}
+
+	payload := &ReviewCyclePayload{
+		PolecatName: matches[1],
+		Preset:      "gate",
+	}
+
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Branch:") {
+			payload.Branch = strings.TrimSpace(strings.TrimPrefix(line, "Branch:"))
+		} else if strings.HasPrefix(line, "Commit:") {
+			payload.Commit = strings.TrimSpace(strings.TrimPrefix(line, "Commit:"))
+		} else if strings.HasPrefix(line, "Preset:") {
+			payload.Preset = strings.TrimSpace(strings.TrimPrefix(line, "Preset:"))
+		} else if strings.HasPrefix(line, "Issue:") {
+			payload.IssueID = strings.TrimSpace(strings.TrimPrefix(line, "Issue:"))
 		}
 	}
 
@@ -250,9 +275,9 @@ func SwarmWispLabels(swarmID string, total, completed int, startTime time.Time) 
 
 // HelpAssessment represents the Witness's assessment of a help request.
 type HelpAssessment struct {
-	CanHelp     bool
-	HelpAction  string // What the Witness can do to help
-	NeedsEscalation bool
+	CanHelp          bool
+	HelpAction       string // What the Witness can do to help
+	NeedsEscalation  bool
 	EscalationReason string
 }
 
