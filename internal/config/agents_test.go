@@ -251,7 +251,7 @@ func TestBuildResumeCommand(t *testing.T) {
 			agentName: "opencode",
 			sessionID: "oc-sess-123",
 			wantEmpty: false,
-			contains:  []string{"opencode", "--continue", "oc-sess-123"},
+			contains:  []string{"opencode", "--session", "oc-sess-123"},
 		},
 		{
 			name:      "empty session ID",
@@ -324,5 +324,52 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 				t.Errorf("GetSessionIDEnvVar(%s) = %q, want %q", tt.agentName, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuiltInAgentNames(t *testing.T) {
+	names := BuiltInAgentNames()
+
+	if len(names) != 4 {
+		t.Errorf("expected 4 built-in agents, got %d", len(names))
+	}
+
+	expected := map[string]bool{"claude": true, "gemini": true, "codex": true, "opencode": true}
+	for _, name := range names {
+		if !expected[name] {
+			t.Errorf("unexpected agent in list: %s", name)
+		}
+		delete(expected, name)
+	}
+
+	if len(expected) > 0 {
+		t.Errorf("missing agents: %v", expected)
+	}
+}
+
+func TestOpenCodeNonInteractiveConfig(t *testing.T) {
+	info := GetAgentPreset(AgentOpenCode)
+	if info == nil {
+		t.Fatal("AgentOpenCode preset not found")
+	}
+
+	if info.NonInteractive == nil {
+		t.Fatal("OpenCode should have NonInteractive config")
+	}
+
+	if info.NonInteractive.Subcommand != "run" {
+		t.Errorf("expected subcommand 'run', got %q", info.NonInteractive.Subcommand)
+	}
+
+	if info.NonInteractive.OutputFlag != "--format json" {
+		t.Errorf("expected output flag '--format json', got %q", info.NonInteractive.OutputFlag)
+	}
+
+	if info.ResumeFlag != "--session" {
+		t.Errorf("expected resume flag '--session', got %q", info.ResumeFlag)
+	}
+
+	if info.ResumeStyle != "flag" {
+		t.Errorf("expected resume style 'flag', got %q", info.ResumeStyle)
 	}
 }

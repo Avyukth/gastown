@@ -144,7 +144,7 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		Command:             "opencode",
 		Args:                []string{},
 		SessionIDEnv:        "",
-		ResumeFlag:          "--continue",
+		ResumeFlag:          "--session",
 		ResumeStyle:         "flag",
 		SupportsHooks:       false,
 		SupportsForkSession: false,
