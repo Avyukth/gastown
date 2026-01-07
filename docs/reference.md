@@ -387,6 +387,23 @@ gt config default-agent claude-glm       # Set default
 }
 ```
 
+**Rig-level agents** (`<rig>/settings/config.json`):
+```json
+{
+  "type": "rig-settings",
+  "version": 1,
+  "agent": "opencode",
+  "agents": {
+    "opencode": {
+      "command": "opencode",
+      "args": ["--session"]
+    }
+  }
+}
+```
+
+**Agent resolution order**: rig-level → town-level → built-in presets.
+
 For OpenCode autonomous mode, set env var in your shell profile:
 ```bash
 export OPENCODE_PERMISSION='{"*":"allow"}'

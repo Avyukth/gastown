@@ -346,6 +346,10 @@ func TestDefaultRigAgentRegistryPath(t *testing.T) {
 
 // TestLoadRigAgentRegistry verifies that rig-level agent registry is loaded correctly.
 func TestLoadRigAgentRegistry(t *testing.T) {
+	// Reset registry for test isolation
+	ResetRegistryForTesting()
+	t.Cleanup(ResetRegistryForTesting)
+
 	tmpDir := t.TempDir()
 	registryPath := filepath.Join(tmpDir, "settings", "agents.json")
 	configDir := filepath.Join(tmpDir, "settings")
@@ -377,13 +381,12 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 	// Test 1: Load should succeed and merge agents
 	t.Run("load and merge", func(t *testing.T) {
 		if err := LoadRigAgentRegistry(registryPath); err != nil {
-			t.Errorf("LoadRigAgentRegistry(%s) failed: %v", registryPath, err)
+			t.Fatalf("LoadRigAgentRegistry(%s) failed: %v", registryPath, err)
 		}
 
-		// Verify agent is available
 		info := GetAgentPresetByName("opencode")
 		if info == nil {
-			t.Errorf("expected opencode agent to be available after loading rig registry")
+			t.Fatal("expected opencode agent to be available after loading rig registry")
 		}
 
 		if info.Command != "opencode" {

@@ -164,16 +164,11 @@ func ensureRegistry() {
 	initRegistryLocked()
 }
 
-// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
-// User-defined agents override built-in presets with the same name.
-// This function caches loaded paths to avoid redundant file reads.
-func LoadAgentRegistry(path string) error {
-	registryMu.Lock()
-	defer registryMu.Unlock()
-
+// loadAgentRegistryFromPath loads agent definitions from a JSON file and merges with built-ins.
+// Caller must hold registryMu write lock.
+func loadAgentRegistryFromPathLocked(path string) error {
 	initRegistryLocked()
 
-	// Check if already loaded from this path
 	if loadedPaths[path] {
 		return nil
 	}
@@ -181,8 +176,8 @@ func LoadAgentRegistry(path string) error {
 	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
 	if err != nil {
 		if os.IsNotExist(err) {
-			loadedPaths[path] = true // Mark as "loaded" (no file)
-			return nil               // No custom config, use built-ins only
+			loadedPaths[path] = true
+			return nil
 		}
 		return err
 	}
@@ -192,7 +187,6 @@ func LoadAgentRegistry(path string) error {
 		return err
 	}
 
-	// Merge user-defined agents (override built-ins)
 	for name, preset := range userRegistry.Agents {
 		preset.Name = AgentPreset(name)
 		globalRegistry.Agents[name] = preset
@@ -200,6 +194,15 @@ func LoadAgentRegistry(path string) error {
 
 	loadedPaths[path] = true
 	return nil
+}
+
+// LoadAgentRegistry loads agent definitions from a JSON file and merges with built-ins.
+// User-defined agents override built-in presets with the same name.
+// This function caches loaded paths to avoid redundant file reads.
+func LoadAgentRegistry(path string) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	return loadAgentRegistryFromPathLocked(path)
 }
 
 // DefaultAgentRegistryPath returns the default path for agent registry.
@@ -225,35 +228,7 @@ func RigAgentRegistryPath(rigPath string) string {
 func LoadRigAgentRegistry(path string) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
-
-	initRegistryLocked()
-
-	if loadedPaths[path] {
-		return nil
-	}
-
-	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from config
-	if err != nil {
-		if os.IsNotExist(err) {
-			loadedPaths[path] = true // Mark as "loaded" (no file)
-			return nil               // No custom config, use built-ins only
-		}
-		return err
-	}
-
-	var userRegistry AgentRegistry
-	if err := json.Unmarshal(data, &userRegistry); err != nil {
-		return err
-	}
-
-	// Merge user-defined agents (override built-ins)
-	for name, preset := range userRegistry.Agents {
-		preset.Name = AgentPreset(name)
-		globalRegistry.Agents[string(name)] = preset
-	}
-
-	loadedPaths[path] = true
-	return nil
+	return loadAgentRegistryFromPathLocked(path)
 }
 
 // GetAgentPreset returns the preset info for a given agent name.

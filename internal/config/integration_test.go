@@ -96,7 +96,7 @@ func TestRigLevelCustomAgentIntegration(t *testing.T) {
 	t.Run("ResolveAgentConfigWithOverride unknown agent errors", func(t *testing.T) {
 		_, _, err := ResolveAgentConfigWithOverride(townRoot, rigPath, "nonexistent-agent")
 		if err == nil {
-			t.Error("Expected error for nonexistent agent, got nil")
+			t.Fatal("Expected error for nonexistent agent, got nil")
 		}
 
 		if !strings.Contains(err.Error(), "not found") {
