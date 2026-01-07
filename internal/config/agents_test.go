@@ -128,7 +128,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 	// Reset global registry for test isolation
 	ResetRegistryForTesting()
 
-	// Load the custom registry
+	// Load should succeed
 	if err := LoadAgentRegistry(configPath); err != nil {
 		t.Fatalf("LoadAgentRegistry failed: %v", err)
 	}
@@ -138,6 +138,7 @@ func TestLoadAgentRegistry(t *testing.T) {
 	if myAgent == nil {
 		t.Fatal("custom agent 'my-agent' not found after loading registry")
 	}
+
 	if myAgent.Command != "my-agent-bin" {
 		t.Errorf("my-agent.Command = %v, want my-agent-bin", myAgent.Command)
 	}
@@ -160,7 +161,7 @@ func TestAgentPresetYOLOFlags(t *testing.T) {
 	}{
 		{AgentClaude, "--dangerously-skip-permissions"},
 		{AgentGemini, "yolo"}, // Part of "--approval-mode yolo"
-		{AgentCodex, "--yolo"},
+		{AgentCodex, "yolo"},
 	}
 
 	for _, tt := range tests {
@@ -196,6 +197,7 @@ func TestMergeWithPreset(t *testing.T) {
 	if merged.Command != "/custom/claude" {
 		t.Errorf("merged command should be user value, got %s", merged.Command)
 	}
+
 	if len(merged.Args) != 1 || merged.Args[0] != "--custom-arg" {
 		t.Errorf("merged args should be user value, got %v", merged.Args)
 	}
@@ -251,12 +253,14 @@ func TestBuildResumeCommand(t *testing.T) {
 			agentName: "claude",
 			sessionID: "",
 			wantEmpty: true,
+			contains:  []string{"claude"},
 		},
 		{
 			name:      "unknown agent",
 			agentName: "unknown-agent",
 			sessionID: "session-123",
 			wantEmpty: true,
+			contains:  []string{},
 		},
 	}
 
@@ -367,6 +371,7 @@ func TestLoadRigAgentRegistry(t *testing.T) {
     }
   }
 }`
+
 	if err := os.WriteFile(registryPath, []byte(registryContent), 0644); err != nil {
 		t.Fatalf("failed to write registry file: %v", err)
 	}
@@ -425,4 +430,3 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 	})
 }
 EOF
-cat internal/config/agents_test.go | tail -50

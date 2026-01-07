@@ -1558,3 +1558,95 @@ func TestSaveTownSettings(t *testing.T) {
 		}
 	})
 }
+
+// TestLookupAgentConfigWithRigSettings verifies that lookupAgentConfig checks
+// rig-level agents first, then town-level agents, then built-ins.
+func TestLookupAgentConfigWithRigSettings(t *testing.T) {
+	tests := []struct {
+		name             string
+		rigSettings      *RigSettings
+		townSettings      *TownSettings
+		expectedCommand  string
+		expectedFrom     string
+	}{
+		{
+			name:        "rig-custom-agent",
+			rigSettings: &RigSettings{
+				Agent: "default-rig-agent",
+				Agents: map[string]*RuntimeConfig{
+					"rig-custom-agent": {
+						Command: "custom-rig-cmd",
+						Args:    []string{"--rig-flag"},
+					},
+				},
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"town-custom-agent": {
+						Command: "custom-town-cmd",
+						Args:    []string{"--town-flag"},
+					},
+				},
+			},
+			expectedCommand: "custom-rig-cmd",
+			expectedFrom:     "rig",
+		},
+		{
+			name:        "town-custom-agent",
+			rigSettings: &RigSettings{
+				Agents: map[string]*RuntimeConfig{
+					"other-rig-agent": {
+						Command: "other-rig-cmd",
+					},
+				},
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"town-custom-agent": {
+						Command: "custom-town-cmd",
+						Args:    []string{"--town-flag"},
+					},
+				},
+			},
+			expectedCommand: "custom-town-cmd",
+			expectedFrom:     "town",
+		},
+		{
+			name:        "unknown-agent",
+			rigSettings: nil,
+			townSettings: nil,
+			expectedCommand: "claude",
+			expectedFrom:     "builtin",
+		},
+		{
+			name:        "claude",
+			rigSettings: &RigSettings{
+				Agent: "claude", // Should NOT override built-in
+			},
+			townSettings: &TownSettings{
+				Agents: map[string]*RuntimeConfig{
+					"claude": {
+						Command: "custom-claude", // Should be ignored for built-ins
+					},
+				},
+			},
+			expectedCommand: "claude",
+			expectedFrom:     "builtin",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rc := lookupAgentConfig(tt.name, tt.rigSettings, tt.townSettings)
+
+			if rc == nil {
+				t.Errorf("lookupAgentConfig(%s) returned nil", tt.name)
+			}
+
+			if rc.Command != tt.expectedCommand {
+				t.Errorf("lookupAgentConfig(%s).Command = %s, want %s", tt.name, rc.Command, tt.expectedCommand)
+			}
+		})
+	}
+EOF
+cat /Users/amrit/Documents/Projects/Rust/mouchak/gastown/internal/config/loader_test.go | tail -20
