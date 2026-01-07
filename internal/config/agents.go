@@ -211,7 +211,13 @@ func DefaultAgentRegistryPath(townRoot string) string {
 // DefaultRigAgentRegistryPath returns the default path for rig-level agent registry.
 // Located in <rig>/settings/agents.json.
 func DefaultRigAgentRegistryPath(rigPath string) string {
-	return filepath.Join(filepath.Dir(rigPath), "settings", "agents.json")
+	return filepath.Join(rigPath, "settings", "agents.json")
+}
+
+// RigAgentRegistryPath returns the path for rig-level agent registry.
+// Alias for DefaultRigAgentRegistryPath for consistency with other path functions.
+func RigAgentRegistryPath(rigPath string) string {
+	return DefaultRigAgentRegistryPath(rigPath)
 }
 
 // LoadRigAgentRegistry loads agent definitions from a rig-level JSON file and merges with built-ins.
@@ -220,7 +226,8 @@ func LoadRigAgentRegistry(path string) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	// Check if already loaded from this path
+	initRegistryLocked()
+
 	if loadedPaths[path] {
 		return nil
 	}

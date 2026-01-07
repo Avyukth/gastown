@@ -829,6 +829,48 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 
 	// Determine which agent name to use
 	agentName := ""
+	if rigSettings != nil && rigSettings.Agent != "" {
+		agentName = rigSettings.Agent
+	} else if townSettings.DefaultAgent != "" {
+		agentName = townSettings.DefaultAgent
+	} else {
+		agentName = "claude" // ultimate fallback
+	}
+
+	return lookupAgentConfig(agentName, townSettings, rigSettings)
+}
+
+// ResolveAgentConfigWithOverride resolves the agent configuration for a rig, with an optional override.
+// If agentOverride is non-empty, it is used instead of rig/town defaults.
+// Returns the resolved RuntimeConfig, the selected agent name, and an error if the override name
+// does not exist in town custom agents or built-in presets.
+func ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride string) (*RuntimeConfig, string, error) {
+	// Load rig settings
+	rigSettings, err := LoadRigSettings(RigSettingsPath(rigPath))
+	if err != nil {
+		rigSettings = nil
+	}
+
+	// Backwards compatibility: if Runtime is set directly, use it (but still report agentOverride if present)
+	if rigSettings != nil && rigSettings.Runtime != nil && agentOverride == "" {
+		rc := rigSettings.Runtime
+		return fillRuntimeDefaults(rc), "", nil
+	}
+
+	// Load town settings for agent lookup
+	townSettings, err := LoadOrCreateTownSettings(TownSettingsPath(townRoot))
+	if err != nil {
+		townSettings = NewTownSettings()
+	}
+
+	// Load custom agent registry if it exists
+	_ = LoadAgentRegistry(DefaultAgentRegistryPath(townRoot))
+
+	// Load rig-level custom agent registry if it exists (for per-rig custom agents)
+	_ = LoadRigAgentRegistry(RigAgentRegistryPath(rigPath))
+
+	// Determine which agent name to use
+	agentName := ""
 	if agentOverride != "" {
 		agentName = agentOverride
 	} else if rigSettings != nil && rigSettings.Agent != "" {
@@ -839,13 +881,21 @@ func ResolveAgentConfig(townRoot, rigPath string) *RuntimeConfig {
 		agentName = "claude" // ultimate fallback
 	}
 
-	// If an override is requested, validate it exists.
+	// If an override is requested, validate it exists
 	if agentOverride != "" {
+		// Check rig-level custom agents first
+		if rigSettings != nil && rigSettings.Agents != nil {
+			if custom, ok := rigSettings.Agents[agentName]; ok && custom != nil {
+				return fillRuntimeDefaults(custom), agentName, nil
+			}
+		}
+		// Then check town-level custom agents
 		if townSettings.Agents != nil {
 			if custom, ok := townSettings.Agents[agentName]; ok && custom != nil {
 				return fillRuntimeDefaults(custom), agentName, nil
 			}
 		}
+		// Then check built-in presets
 		if preset := GetAgentPresetByName(agentName); preset != nil {
 			return RuntimeConfigFromPreset(AgentPreset(agentName)), agentName, nil
 		}

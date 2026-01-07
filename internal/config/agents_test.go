@@ -161,7 +161,7 @@ func TestAgentPresetYOLOFlags(t *testing.T) {
 	}{
 		{AgentClaude, "--dangerously-skip-permissions"},
 		{AgentGemini, "yolo"}, // Part of "--approval-mode yolo"
-		{AgentCodex, "yolo"},
+		{AgentCodex, "--yolo"},
 	}
 
 	for _, tt := range tests {
@@ -325,11 +325,11 @@ func TestGetSessionIDEnvVar(t *testing.T) {
 // TestDefaultRigAgentRegistryPath verifies that the default rig agent registry path is constructed correctly.
 func TestDefaultRigAgentRegistryPath(t *testing.T) {
 	tests := []struct {
-		rigPath     string
+		rigPath      string
 		expectedPath string
 	}{
-		{"/Users/alice/gt/myproject", "/Users/alice/gt/settings/agents.json"},
-		{"/tmp/my-rig", "/tmp/settings/agents.json"},
+		{"/Users/alice/gt/myproject", "/Users/alice/gt/myproject/settings/agents.json"},
+		{"/tmp/my-rig", "/tmp/my-rig/settings/agents.json"},
 		{"relative/path", "relative/path/settings/agents.json"},
 	}
 
@@ -346,9 +346,7 @@ func TestDefaultRigAgentRegistryPath(t *testing.T) {
 
 // TestLoadRigAgentRegistry verifies that rig-level agent registry is loaded correctly.
 func TestLoadRigAgentRegistry(t *testing.T) {
-	// Create temporary directory and JSON file
 	tmpDir := t.TempDir()
-	rigPath := filepath.Join(tmpDir, "my-rig")
 	registryPath := filepath.Join(tmpDir, "settings", "agents.json")
 	configDir := filepath.Join(tmpDir, "settings")
 
@@ -400,14 +398,14 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 			t.Errorf("LoadRigAgentRegistry(%s) should not error for non-existent file: %v", nonExistentPath, err)
 		}
 
-		// Verify no new agents were added
+		// Verify that previously loaded agent (from test 1) is still available
 		info := GetAgentPresetByName("opencode")
 		if info == nil {
-			t.Errorf("expected opencode agent to not be available when loading non-existent rig registry")
+			t.Errorf("expected opencode agent to still be available after loading non-existent path")
+			return
 		}
-
-		if info.Command == "opencode" {
-			t.Errorf("expected opencode agent to still be available after failed load, but it was loaded from previous test")
+		if info.Command != "opencode" {
+			t.Errorf("expected opencode agent command to be 'opencode', got %s", info.Command)
 		}
 	})
 
@@ -429,4 +427,3 @@ func TestLoadRigAgentRegistry(t *testing.T) {
 		}
 	})
 }
-EOF
