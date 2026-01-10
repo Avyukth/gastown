@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/spf13/cobra"
 	"github.com/steveyegge/gastown/internal/beads"
 	"github.com/steveyegge/gastown/internal/daemon"
@@ -13,6 +16,11 @@ import (
 	"github.com/steveyegge/gastown/internal/style"
 	"github.com/steveyegge/gastown/internal/tmux"
 	"github.com/steveyegge/gastown/internal/workspace"
+)
+
+const (
+	shutdownLockFile    = "daemon/shutdown.lock"
+	shutdownLockTimeout = 5 * time.Second
 )
 
 var downCmd = &cobra.Command{
@@ -62,6 +70,15 @@ func runDown(cmd *cobra.Command, args []string) error {
 	townRoot, err := workspace.FindFromCwdOrError()
 	if err != nil {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
+	}
+
+	// Phase 0: Acquire shutdown lock (skip for dry-run)
+	if !downDryRun {
+		lock, err := acquireShutdownLock(townRoot)
+		if err != nil {
+			return fmt.Errorf("cannot proceed: %w", err)
+		}
+		defer lock.Unlock()
 	}
 
 	t := tmux.NewTmux()
@@ -255,4 +272,30 @@ func stopSession(t *tmux.Tmux, sessionName string) error {
 
 	// Kill the session
 	return t.KillSession(sessionName)
+}
+
+// acquireShutdownLock prevents concurrent shutdowns.
+// Returns the lock (caller must defer Unlock()) or error if lock held.
+func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
+	lockPath := filepath.Join(townRoot, shutdownLockFile)
+
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return nil, fmt.Errorf("creating lock directory: %w", err)
+	}
+
+	lock := flock.New(lockPath)
+
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownLockTimeout)
+	defer cancel()
+
+	locked, err := lock.TryLockContext(ctx, 100*time.Millisecond)
+	if err != nil {
+		return nil, fmt.Errorf("lock acquisition failed: %w", err)
+	}
+
+	if !locked {
+		return nil, fmt.Errorf("another shutdown is in progress (lock held: %s)", lockPath)
+	}
+
+	return lock, nil
 }
