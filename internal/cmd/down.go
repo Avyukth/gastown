@@ -74,6 +74,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not in a Gas Town workspace: %w", err)
 	}
 
+	t := tmux.NewTmux()
+	if !t.IsAvailable() {
+		return fmt.Errorf("tmux not available (is tmux installed and on PATH?)")
+	}
+
 	// Phase 0: Acquire shutdown lock (skip for dry-run)
 	if !downDryRun {
 		lock, err := acquireShutdownLock(townRoot)
@@ -82,8 +87,6 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 		defer lock.Unlock()
 	}
-
-	t := tmux.NewTmux()
 	allOK := true
 
 	if downDryRun {

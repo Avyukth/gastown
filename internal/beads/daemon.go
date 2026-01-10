@@ -143,8 +143,6 @@ func StartBdDaemonIfNeeded(workDir string) error {
 // Returns (daemonsKilled, activityKilled, error).
 // If dryRun is true, returns counts without stopping anything.
 func StopAllBdProcesses(dryRun, force bool) (int, int, error) {
-	var daemonsKilled, activityKilled int
-
 	if _, err := exec.LookPath("bd"); err != nil {
 		return 0, 0, nil
 	}
@@ -156,12 +154,14 @@ func StopAllBdProcesses(dryRun, force bool) (int, int, error) {
 		return daemonsBefore, activityBefore, nil
 	}
 
-	if daemonsBefore > 0 {
-		daemonsKilled = stopBdDaemons()
-	}
+	daemonsKilled, daemonsRemaining := stopBdDaemons(force)
+	activityKilled, activityRemaining := stopBdActivityProcesses(force)
 
-	if activityBefore > 0 {
-		activityKilled = stopBdActivityProcesses(force)
+	if daemonsRemaining > 0 {
+		return daemonsKilled, activityKilled, fmt.Errorf("bd daemon shutdown incomplete: %d still running", daemonsRemaining)
+	}
+	if activityRemaining > 0 {
+		return daemonsKilled, activityKilled, fmt.Errorf("bd activity shutdown incomplete: %d still running", activityRemaining)
 	}
 
 	return daemonsKilled, activityKilled, nil
@@ -183,14 +183,14 @@ func parseBdDaemonCount(output []byte) int {
 		return 0
 	}
 
-	var daemons []interface{}
+	var daemons []any
 	if err := json.Unmarshal(output, &daemons); err == nil {
 		return len(daemons)
 	}
 
 	var wrapper struct {
-		Daemons []interface{} `json:"daemons"`
-		Count   int           `json:"count"`
+		Daemons []any `json:"daemons"`
+		Count   int   `json:"count"`
 	}
 	if err := json.Unmarshal(output, &wrapper); err == nil {
 		if wrapper.Count > 0 {
@@ -202,11 +202,10 @@ func parseBdDaemonCount(output []byte) int {
 	return 0
 }
 
-// stopBdDaemons uses `bd daemon killall` to stop all bd daemons.
-func stopBdDaemons() int {
+func stopBdDaemons(force bool) (int, int) {
 	before := CountBdDaemons()
 	if before == 0 {
-		return 0
+		return 0, 0
 	}
 
 	killCmd := exec.Command("bd", "daemon", "killall")
@@ -215,7 +214,24 @@ func stopBdDaemons() int {
 	time.Sleep(100 * time.Millisecond)
 
 	after := CountBdDaemons()
-	return before - after
+	if after == 0 {
+		return before, 0
+	}
+
+	if force {
+		_ = exec.Command("pkill", "-9", "-f", "bd daemon").Run()
+	} else {
+		_ = exec.Command("pkill", "-TERM", "-f", "bd daemon").Run()
+		time.Sleep(gracefulTimeout)
+		if remaining := CountBdDaemons(); remaining > 0 {
+			_ = exec.Command("pkill", "-9", "-f", "bd daemon").Run()
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	final := CountBdDaemons()
+	return before - final, final
 }
 
 // CountBdActivityProcesses returns count of running `bd activity` processes.
@@ -229,11 +245,10 @@ func CountBdActivityProcesses() int {
 	return count
 }
 
-// stopBdActivityProcesses gracefully stops bd activity processes.
-func stopBdActivityProcesses(force bool) int {
+func stopBdActivityProcesses(force bool) (int, int) {
 	before := CountBdActivityProcesses()
 	if before == 0 {
-		return 0
+		return 0, 0
 	}
 
 	if force {
@@ -249,5 +264,5 @@ func stopBdActivityProcesses(force bool) int {
 	time.Sleep(100 * time.Millisecond)
 
 	after := CountBdActivityProcesses()
-	return before - after
+	return before - after, after
 }
