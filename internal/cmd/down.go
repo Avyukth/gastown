@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -191,7 +193,26 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Phase 5: Nuke tmux server (--nuke only, DESTRUCTIVE)
+	// Phase 5: Verification (--all only)
+	if downAll && !downDryRun {
+		time.Sleep(500 * time.Millisecond)
+		respawned := verifyShutdown(t, townRoot)
+		if len(respawned) > 0 {
+			fmt.Println()
+			fmt.Printf("%s Warning: Some processes may have respawned:\n", style.Bold.Render("⚠"))
+			for _, r := range respawned {
+				fmt.Printf("  • %s\n", r)
+			}
+			fmt.Println()
+			fmt.Printf("This may indicate systemd/launchd is managing bd.\n")
+			fmt.Printf("Check with:\n")
+			fmt.Printf("  %s\n", style.Dim.Render("systemctl status bd-daemon  # Linux"))
+			fmt.Printf("  %s\n", style.Dim.Render("launchctl list | grep bd    # macOS"))
+			allOK = false
+		}
+	}
+
+	// Phase 6: Nuke tmux server (--nuke only, DESTRUCTIVE)
 	if downNuke {
 		if !downDryRun && os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
 			fmt.Println()
@@ -298,4 +319,45 @@ func acquireShutdownLock(townRoot string) (*flock.Flock, error) {
 	}
 
 	return lock, nil
+}
+
+// verifyShutdown checks for respawned processes after shutdown.
+// Returns list of things that are still running or respawned.
+func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
+	var respawned []string
+
+	if count := beads.CountBdDaemons(); count > 0 {
+		respawned = append(respawned, fmt.Sprintf("bd daemon (%d running)", count))
+	}
+
+	if count := beads.CountBdActivityProcesses(); count > 0 {
+		respawned = append(respawned, fmt.Sprintf("bd activity (%d running)", count))
+	}
+
+	sessions, err := t.ListSessions()
+	if err == nil {
+		for _, sess := range sessions {
+			if strings.HasPrefix(sess, "gt-") || strings.HasPrefix(sess, "hq-") {
+				respawned = append(respawned, fmt.Sprintf("tmux session %s", sess))
+			}
+		}
+	}
+
+	pidFile := filepath.Join(townRoot, "daemon", "daemon.pid")
+	if pidData, err := os.ReadFile(pidFile); err == nil {
+		var pid int
+		if _, err := fmt.Sscanf(string(pidData), "%d", &pid); err == nil {
+			if isProcessRunning(pid) {
+				respawned = append(respawned, fmt.Sprintf("gt daemon (PID %d)", pid))
+			}
+		}
+	}
+
+	return respawned
+}
+
+// isProcessRunning checks if a process with the given PID exists.
+func isProcessRunning(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil
 }
