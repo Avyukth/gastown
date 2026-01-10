@@ -5,7 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
+)
+
+const (
+	gracefulTimeout = 2 * time.Second
 )
 
 // BdDaemonInfo represents the status of a single bd daemon instance.
@@ -131,4 +137,117 @@ func StartBdDaemonIfNeeded(workDir string) error {
 	cmd := exec.Command("bd", "daemon", "--start")
 	cmd.Dir = workDir
 	return cmd.Run()
+}
+
+// StopAllBdProcesses stops all bd daemon and activity processes.
+// Returns (daemonsKilled, activityKilled, error).
+// If dryRun is true, returns counts without stopping anything.
+func StopAllBdProcesses(dryRun, force bool) (int, int, error) {
+	var daemonsKilled, activityKilled int
+
+	if _, err := exec.LookPath("bd"); err != nil {
+		return 0, 0, nil
+	}
+
+	daemonsBefore := CountBdDaemons()
+	activityBefore := CountBdActivityProcesses()
+
+	if dryRun {
+		return daemonsBefore, activityBefore, nil
+	}
+
+	if daemonsBefore > 0 {
+		daemonsKilled = stopBdDaemons()
+	}
+
+	if activityBefore > 0 {
+		activityKilled = stopBdActivityProcesses(force)
+	}
+
+	return daemonsKilled, activityKilled, nil
+}
+
+// CountBdDaemons returns count of running bd daemons.
+func CountBdDaemons() int {
+	listCmd := exec.Command("bd", "daemon", "list", "--json")
+	output, err := listCmd.Output()
+	if err != nil {
+		return 0
+	}
+	return parseBdDaemonCount(output)
+}
+
+// parseBdDaemonCount parses bd daemon list --json output.
+func parseBdDaemonCount(output []byte) int {
+	if len(output) == 0 {
+		return 0
+	}
+
+	var daemons []interface{}
+	if err := json.Unmarshal(output, &daemons); err == nil {
+		return len(daemons)
+	}
+
+	var wrapper struct {
+		Daemons []interface{} `json:"daemons"`
+		Count   int           `json:"count"`
+	}
+	if err := json.Unmarshal(output, &wrapper); err == nil {
+		if wrapper.Count > 0 {
+			return wrapper.Count
+		}
+		return len(wrapper.Daemons)
+	}
+
+	return 0
+}
+
+// stopBdDaemons uses `bd daemon killall` to stop all bd daemons.
+func stopBdDaemons() int {
+	before := CountBdDaemons()
+	if before == 0 {
+		return 0
+	}
+
+	killCmd := exec.Command("bd", "daemon", "killall")
+	_ = killCmd.Run()
+
+	time.Sleep(100 * time.Millisecond)
+
+	after := CountBdDaemons()
+	return before - after
+}
+
+// CountBdActivityProcesses returns count of running `bd activity` processes.
+func CountBdActivityProcesses() int {
+	cmd := exec.Command("pgrep", "-fc", "bd activity")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	count, _ := strconv.Atoi(strings.TrimSpace(string(output)))
+	return count
+}
+
+// stopBdActivityProcesses gracefully stops bd activity processes.
+func stopBdActivityProcesses(force bool) int {
+	before := CountBdActivityProcesses()
+	if before == 0 {
+		return 0
+	}
+
+	if force {
+		_ = exec.Command("pkill", "-9", "-f", "bd activity").Run()
+	} else {
+		_ = exec.Command("pkill", "-TERM", "-f", "bd activity").Run()
+		time.Sleep(gracefulTimeout)
+		if remaining := CountBdActivityProcesses(); remaining > 0 {
+			_ = exec.Command("pkill", "-9", "-f", "bd activity").Run()
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	after := CountBdActivityProcesses()
+	return before - after
 }
