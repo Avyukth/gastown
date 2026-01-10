@@ -60,9 +60,20 @@ func runDown(cmd *cobra.Command, args []string) error {
 	allOK := true
 
 	// Stop in reverse order of startup
-
-	// 1. Stop witnesses first
 	rigs := discoverRigs(townRoot)
+
+	// 1. Stop refineries first (was missing - bug fix)
+	for _, rigName := range rigs {
+		sessionName := fmt.Sprintf("gt-%s-refinery", rigName)
+		if err := stopSession(t, sessionName); err != nil {
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
+			allOK = false
+		} else {
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
+		}
+	}
+
+	// 2. Stop witnesses
 	for _, rigName := range rigs {
 		sessionName := fmt.Sprintf("gt-%s-witness", rigName)
 		if err := stopSession(t, sessionName); err != nil {
@@ -73,7 +84,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 2. Stop town-level sessions (Mayor, Boot, Deacon) in correct order
+	// 3. Stop town-level sessions (Mayor, Boot, Deacon) in correct order
 	for _, ts := range session.TownSessions() {
 		stopped, err := session.StopTownSession(t, ts, downForce)
 		if err != nil {
@@ -86,7 +97,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// 3. Stop Daemon last
+	// 4. Stop Daemon last
 	running, _, _ := daemon.IsRunning(townRoot)
 	if running {
 		if err := daemon.StopDaemon(townRoot); err != nil {
@@ -99,7 +110,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		printDownStatus("Daemon", true, "not running")
 	}
 
-	// 4. Kill tmux server if --all
+	// 5. Kill tmux server if --all
 	if downAll {
 		if err := t.KillServer(); err != nil {
 			printDownStatus("Tmux server", false, err.Error())
@@ -115,6 +126,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		// Log halt event with stopped services
 		stoppedServices := []string{"daemon", "deacon", "boot", "mayor"}
 		for _, rigName := range rigs {
+			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/refinery", rigName))
 			stoppedServices = append(stoppedServices, fmt.Sprintf("%s/witness", rigName))
 		}
 		if downAll {
