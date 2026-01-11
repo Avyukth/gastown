@@ -361,6 +361,16 @@ func verifyShutdown(t *tmux.Tmux, townRoot string) []string {
 
 // isProcessRunning checks if a process with the given PID exists.
 func isProcessRunning(pid int) bool {
+	if pid <= 0 {
+		return false // Invalid PID
+	}
 	err := syscall.Kill(pid, 0)
-	return err == nil
+	if err == nil {
+		return true
+	}
+	// EPERM means process exists but we don't have permission to signal it
+	if err == syscall.EPERM {
+		return true
+	}
+	return false
 }

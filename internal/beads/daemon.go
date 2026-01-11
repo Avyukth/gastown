@@ -231,7 +231,11 @@ func stopBdDaemons(force bool) (int, int) {
 	time.Sleep(100 * time.Millisecond)
 
 	final := CountBdDaemons()
-	return before - final, final
+	killed := before - final
+	if killed < 0 {
+		killed = 0 // Race condition: more processes spawned than we killed
+	}
+	return killed, final
 }
 
 // CountBdActivityProcesses returns count of running `bd activity` processes.
@@ -264,5 +268,9 @@ func stopBdActivityProcesses(force bool) (int, int) {
 	time.Sleep(100 * time.Millisecond)
 
 	after := CountBdActivityProcesses()
-	return before - after, after
+	killed := before - after
+	if killed < 0 {
+		killed = 0 // Race condition: more processes spawned than we killed
+	}
+	return killed, after
 }
