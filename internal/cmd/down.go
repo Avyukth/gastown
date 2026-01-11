@@ -85,7 +85,9 @@ func runDown(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("cannot proceed: %w", err)
 		}
-		defer lock.Unlock()
+		defer func() {
+			_ = lock.Unlock()
+		}()
 	}
 	allOK := true
 
