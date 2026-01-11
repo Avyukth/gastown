@@ -133,11 +133,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 			}
 			continue
 		}
-		if err := stopSession(t, sessionName); err != nil {
+		wasRunning, err := stopSession(t, sessionName)
+		if err != nil {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), false, err.Error())
 			allOK = false
-		} else {
+		} else if wasRunning {
 			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "stopped")
+		} else {
+			printDownStatus(fmt.Sprintf("Refinery (%s)", rigName), true, "not running")
 		}
 	}
 
@@ -150,11 +153,14 @@ func runDown(cmd *cobra.Command, args []string) error {
 			}
 			continue
 		}
-		if err := stopSession(t, sessionName); err != nil {
+		wasRunning, err := stopSession(t, sessionName)
+		if err != nil {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), false, err.Error())
 			allOK = false
-		} else {
+		} else if wasRunning {
 			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "stopped")
+		} else {
+			printDownStatus(fmt.Sprintf("Witness (%s)", rigName), true, "not running")
 		}
 	}
 
@@ -178,8 +184,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Phase 4: Stop Daemon
-	running, pid, _ := daemon.IsRunning(townRoot)
-	if downDryRun {
+	running, pid, daemonErr := daemon.IsRunning(townRoot)
+	if daemonErr != nil {
+		printDownStatus("Daemon", false, fmt.Sprintf("status check failed: %v", daemonErr))
+		allOK = false
+	} else if downDryRun {
 		if running {
 			printDownStatus("Daemon", true, fmt.Sprintf("would stop (PID %d)", pid))
 		}
@@ -217,17 +226,17 @@ func runDown(cmd *cobra.Command, args []string) error {
 
 	// Phase 6: Nuke tmux server (--nuke only, DESTRUCTIVE)
 	if downNuke {
-		if !downDryRun && os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
-			fmt.Println()
-			fmt.Printf("%s The --nuke flag kills ALL tmux sessions, not just Gas Town.\n",
-				style.Bold.Render("⚠ WARNING:"))
-			fmt.Printf("This includes vim sessions, running builds, SSH connections, etc.\n")
-			fmt.Printf("Set GT_NUKE_ACKNOWLEDGED=1 to suppress this warning.\n")
-			fmt.Println()
-		}
-
 		if downDryRun {
 			printDownStatus("Tmux server", true, "would kill (DESTRUCTIVE)")
+		} else if os.Getenv("GT_NUKE_ACKNOWLEDGED") == "" {
+			// Require explicit acknowledgement for destructive operation
+			fmt.Println()
+			fmt.Printf("%s The --nuke flag kills ALL tmux sessions, not just Gas Town.\n",
+				style.Bold.Render("⚠ BLOCKED:"))
+			fmt.Printf("This includes vim sessions, running builds, SSH connections, etc.\n")
+			fmt.Println()
+			fmt.Printf("To proceed, run with: %s\n", style.Bold.Render("GT_NUKE_ACKNOWLEDGED=1 gt down --nuke"))
+			allOK = false
 		} else {
 			if err := t.KillServer(); err != nil {
 				printDownStatus("Tmux server", false, err.Error())
@@ -279,13 +288,14 @@ func printDownStatus(name string, ok bool, detail string) {
 }
 
 // stopSession gracefully stops a tmux session.
-func stopSession(t *tmux.Tmux, sessionName string) error {
+// Returns (wasRunning, error) - wasRunning is true if session existed and was stopped.
+func stopSession(t *tmux.Tmux, sessionName string) (bool, error) {
 	running, err := t.HasSession(sessionName)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !running {
-		return nil // Already stopped
+		return false, nil // Already stopped
 	}
 
 	// Try graceful shutdown first (Ctrl-C, best-effort interrupt)
@@ -295,7 +305,7 @@ func stopSession(t *tmux.Tmux, sessionName string) error {
 	}
 
 	// Kill the session
-	return t.KillSession(sessionName)
+	return true, t.KillSession(sessionName)
 }
 
 // acquireShutdownLock prevents concurrent shutdowns.

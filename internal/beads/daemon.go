@@ -75,21 +75,12 @@ func EnsureBdDaemonHealth(workDir string) string {
 
 	// Check if any daemons need attention
 	needsRestart := false
-	var issues []string
-
 	for _, d := range health.Daemons {
 		switch d.Status {
 		case "healthy":
 			// Good
-		case "version_mismatch":
+		case "version_mismatch", "stale", "unresponsive":
 			needsRestart = true
-			issues = append(issues, fmt.Sprintf("%s: version mismatch", d.Workspace))
-		case "stale":
-			needsRestart = true
-			issues = append(issues, fmt.Sprintf("%s: stale", d.Workspace))
-		case "unresponsive":
-			needsRestart = true
-			issues = append(issues, fmt.Sprintf("%s: unresponsive", d.Workspace))
 		}
 	}
 
@@ -218,6 +209,9 @@ func stopBdDaemons(force bool) (int, int) {
 		return before, 0
 	}
 
+	// Note: pkill -f pattern may match unintended processes in rare cases
+	// (e.g., editors with "bd daemon" in file content). This is acceptable
+	// as a fallback when bd daemon killall fails.
 	if force {
 		_ = exec.Command("pkill", "-9", "-f", "bd daemon").Run()
 	} else {
@@ -240,7 +234,9 @@ func stopBdDaemons(force bool) (int, int) {
 
 // CountBdActivityProcesses returns count of running `bd activity` processes.
 func CountBdActivityProcesses() int {
-	cmd := exec.Command("pgrep", "-fc", "bd activity")
+	// Use pgrep -f with wc -l for cross-platform compatibility
+	// (macOS pgrep doesn't support -c flag)
+	cmd := exec.Command("sh", "-c", "pgrep -f 'bd activity' 2>/dev/null | wc -l")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0
