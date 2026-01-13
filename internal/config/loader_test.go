@@ -2389,8 +2389,8 @@ func TestEscalationConfigGetRouteForSeverity(t *testing.T) {
 	}{
 		{SeverityLow, []string{"bead"}},
 		{SeverityMedium, []string{"bead", "mail:mayor"}},
-		{SeverityHigh, []string{"bead", "mail:mayor"}},       // fallback for missing
-		{SeverityCritical, []string{"bead", "mail:mayor"}},   // fallback for missing
+		{SeverityHigh, []string{"bead", "mail:mayor"}},     // fallback for missing
+		{SeverityCritical, []string{"bead", "mail:mayor"}}, // fallback for missing
 	}
 
 	for _, tt := range tests {
@@ -2504,5 +2504,75 @@ func TestEscalationConfigPath(t *testing.T) {
 	expected := "/home/user/gt/settings/escalation.json"
 	if path != expected {
 		t.Errorf("EscalationConfigPath = %q, want %q", path, expected)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_PriorityOverRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with role_agents: refinery = codex
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleRefinery: "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// agentOverride = "gemini" should take priority over role_agents[refinery] = "codex"
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": constants.RoleRefinery},
+		rigPath,
+		"",
+		"gemini", // explicit override
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	if !strings.Contains(cmd, "gemini") {
+		t.Errorf("expected gemini (override) in command, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "codex") {
+		t.Errorf("did not expect codex (role_agents) when override is set: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommandWithAgentOverride_IncludesGTRoot(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Create necessary config files
+	townSettings := NewTownSettings()
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), NewRigSettings()); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd, err := BuildStartupCommandWithAgentOverride(
+		map[string]string{"GT_ROLE": constants.RoleWitness},
+		rigPath,
+		"",
+		"gemini",
+	)
+	if err != nil {
+		t.Fatalf("BuildStartupCommandWithAgentOverride: %v", err)
+	}
+
+	// Should include GT_ROOT in export
+	if !strings.Contains(cmd, "GT_ROOT="+townRoot) {
+		t.Errorf("expected GT_ROOT=%s in command, got: %q", townRoot, cmd)
 	}
 }

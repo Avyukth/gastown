@@ -1301,12 +1301,13 @@ func PrependEnv(command string, envVars map[string]string) string {
 //  3. Default agent resolution (rig's Agent → town's DefaultAgent → "claude")
 func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, prompt, agentOverride string) (string, error) {
 	var rc *RuntimeConfig
+	var townRoot string
 
 	// Extract role from envVars for role-based agent resolution (when no override)
 	role := envVars["GT_ROLE"]
 
 	if rigPath != "" {
-		townRoot := filepath.Dir(rigPath)
+		townRoot = filepath.Dir(rigPath)
 		if agentOverride != "" {
 			var err error
 			rc, _, err = ResolveAgentConfigWithOverride(townRoot, rigPath, agentOverride)
@@ -1320,7 +1321,8 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 			rc = ResolveAgentConfig(townRoot, rigPath)
 		}
 	} else {
-		townRoot, err := findTownRootFromCwd()
+		var err error
+		townRoot, err = findTownRootFromCwd()
 		if err != nil {
 			rc = DefaultRuntimeConfig()
 		} else {
@@ -1339,9 +1341,22 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 		}
 	}
 
+	// Copy env vars to avoid mutating caller map
+	resolvedEnv := make(map[string]string, len(envVars)+2)
+	for k, v := range envVars {
+		resolvedEnv[k] = v
+	}
+	// Add GT_ROOT so agents can find town-level resources (formulas, etc.)
+	if townRoot != "" {
+		resolvedEnv["GT_ROOT"] = townRoot
+	}
+	if rc.Session != nil && rc.Session.SessionIDEnv != "" {
+		resolvedEnv["GT_SESSION_ID_ENV"] = rc.Session.SessionIDEnv
+	}
+
 	// Build environment export prefix
 	var exports []string
-	for k, v := range envVars {
+	for k, v := range resolvedEnv {
 		exports = append(exports, fmt.Sprintf("%s=%s", k, v))
 	}
 	sort.Strings(exports)
@@ -1359,7 +1374,6 @@ func BuildStartupCommandWithAgentOverride(envVars map[string]string, rigPath, pr
 
 	return cmd, nil
 }
-
 
 // BuildAgentStartupCommand is a convenience function for starting agent sessions.
 // It sets standard environment variables (GT_ROLE, BD_ACTOR, GIT_AUTHOR_NAME)
