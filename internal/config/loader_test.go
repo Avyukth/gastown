@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/steveyegge/gastown/internal/constants"
 )
 
 func TestTownConfigRoundTrip(t *testing.T) {
@@ -1190,6 +1192,189 @@ func TestBuildStartupCommand_UsesRigAgentWhenRigPathProvided(t *testing.T) {
 	}
 	if strings.Contains(cmd, "gemini --approval-mode yolo") {
 		t.Fatalf("did not expect town default agent in command: %q", cmd)
+	}
+}
+
+func TestBuildStartupCommand_UsesRoleAgentsFromTownSettings(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with role_agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleRefinery: "gemini",
+		constants.RoleWitness:  "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings (no agent override)
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	t.Run("refinery role gets gemini from role_agents", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": constants.RoleRefinery}, rigPath, "")
+		if !strings.Contains(cmd, "gemini") {
+			t.Fatalf("expected gemini for refinery role, got: %q", cmd)
+		}
+	})
+
+	t.Run("witness role gets codex from role_agents", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": constants.RoleWitness}, rigPath, "")
+		if !strings.Contains(cmd, "codex") {
+			t.Fatalf("expected codex for witness role, got: %q", cmd)
+		}
+	})
+
+	t.Run("crew role falls back to default_agent (not in role_agents)", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{"GT_ROLE": constants.RoleCrew}, rigPath, "")
+		if !strings.Contains(cmd, "claude") {
+			t.Fatalf("expected claude fallback for crew role, got: %q", cmd)
+		}
+	})
+
+	t.Run("no role falls back to default resolution", func(t *testing.T) {
+		cmd := BuildStartupCommand(map[string]string{}, rigPath, "")
+		if !strings.Contains(cmd, "claude") {
+			t.Fatalf("expected claude for no role, got: %q", cmd)
+		}
+	})
+}
+
+func TestBuildStartupCommand_RigRoleAgentsOverridesTownRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Town settings has witness = gemini
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleWitness: "gemini",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Rig settings overrides witness to codex
+	rigSettings := NewRigSettings()
+	rigSettings.RoleAgents = map[string]string{
+		constants.RoleWitness: "codex",
+	}
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	cmd := BuildStartupCommand(map[string]string{"GT_ROLE": constants.RoleWitness}, rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected codex from rig role_agents override, got: %q", cmd)
+	}
+	if strings.Contains(cmd, "gemini") {
+		t.Fatalf("did not expect town role_agents (gemini) in command: %q", cmd)
+	}
+}
+
+func TestBuildAgentStartupCommand_UsesRoleAgents(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with role_agents
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleRefinery: "codex",
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// BuildAgentStartupCommand passes role via GT_ROLE env var
+	cmd := BuildAgentStartupCommand(constants.RoleRefinery, "testrig/refinery", rigPath, "")
+	if !strings.Contains(cmd, "codex") {
+		t.Fatalf("expected codex for refinery role, got: %q", cmd)
+	}
+	if !strings.Contains(cmd, "GT_ROLE="+constants.RoleRefinery) {
+		t.Fatalf("expected GT_ROLE=%s in command: %q", constants.RoleRefinery, cmd)
+	}
+}
+
+func TestValidateAgentConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid built-in agent", func(t *testing.T) {
+		// claude is a built-in preset and binary should exist
+		err := ValidateAgentConfig("claude", nil, nil)
+		// Note: This may fail if claude binary is not installed, which is expected
+		if err != nil && !strings.Contains(err.Error(), "not found in PATH") {
+			t.Errorf("unexpected error for claude: %v", err)
+		}
+	})
+
+	t.Run("invalid agent name", func(t *testing.T) {
+		err := ValidateAgentConfig("nonexistent-agent-xyz", nil, nil)
+		if err == nil {
+			t.Error("expected error for nonexistent agent")
+		}
+		if !strings.Contains(err.Error(), "not found in config or built-in presets") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("custom agent with missing binary", func(t *testing.T) {
+		townSettings := NewTownSettings()
+		townSettings.Agents = map[string]*RuntimeConfig{
+			"my-custom-agent": {
+				Command: "nonexistent-binary-xyz123",
+				Args:    []string{"--some-flag"},
+			},
+		}
+		err := ValidateAgentConfig("my-custom-agent", townSettings, nil)
+		if err == nil {
+			t.Error("expected error for missing binary")
+		}
+		if !strings.Contains(err.Error(), "not found in PATH") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+}
+
+func TestResolveRoleAgentConfig_FallsBackOnInvalidAgent(t *testing.T) {
+	t.Parallel()
+	townRoot := t.TempDir()
+	rigPath := filepath.Join(townRoot, "testrig")
+
+	// Configure town settings with an invalid agent for refinery
+	townSettings := NewTownSettings()
+	townSettings.DefaultAgent = "claude"
+	townSettings.RoleAgents = map[string]string{
+		constants.RoleRefinery: "nonexistent-agent-xyz", // Invalid agent
+	}
+	if err := SaveTownSettings(TownSettingsPath(townRoot), townSettings); err != nil {
+		t.Fatalf("SaveTownSettings: %v", err)
+	}
+
+	// Create empty rig settings
+	rigSettings := NewRigSettings()
+	if err := SaveRigSettings(RigSettingsPath(rigPath), rigSettings); err != nil {
+		t.Fatalf("SaveRigSettings: %v", err)
+	}
+
+	// Should fall back to default (claude) when agent is invalid
+	rc := ResolveRoleAgentConfig(constants.RoleRefinery, townRoot, rigPath)
+	if rc.Command != "claude" {
+		t.Errorf("expected fallback to claude, got: %s", rc.Command)
 	}
 }
 
