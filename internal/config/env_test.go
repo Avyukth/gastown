@@ -192,6 +192,27 @@ func TestShellQuote(t *testing.T) {
 			input:    "FOO_BAR_123",
 			expected: "FOO_BAR_123",
 		},
+		// CRITICAL: These values are used by existing agents and must NOT be quoted
+		{
+			name:     "path with slashes (GT_ROOT, CLAUDE_CONFIG_DIR)",
+			input:    "/home/user/.config/claude",
+			expected: "/home/user/.config/claude", // NOT quoted
+		},
+		{
+			name:     "BD_ACTOR with slashes",
+			input:    "myrig/polecats/Toast",
+			expected: "myrig/polecats/Toast", // NOT quoted
+		},
+		{
+			name:     "value with hyphen",
+			input:    "deacon-boot",
+			expected: "deacon-boot", // NOT quoted
+		},
+		{
+			name:     "value with dots",
+			input:    "user.name",
+			expected: "user.name", // NOT quoted
+		},
 		{
 			name:     "value with spaces",
 			input:    "hello world",
