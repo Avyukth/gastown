@@ -1085,6 +1085,13 @@ func fillRuntimeDefaults(rc *RuntimeConfig) *RuntimeConfig {
 		Args:          rc.Args,
 		InitialPrompt: rc.InitialPrompt,
 	}
+	// Copy Env map to avoid mutation and preserve agent-specific env vars
+	if len(rc.Env) > 0 {
+		result.Env = make(map[string]string, len(rc.Env))
+		for k, v := range rc.Env {
+			result.Env[k] = v
+		}
+	}
 	if result.Command == "" {
 		result.Command = "claude"
 	}

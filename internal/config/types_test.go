@@ -503,3 +503,76 @@ func TestWaitForRuntimeReadyBehavior(t *testing.T) {
 		t.Log("If agent crashes during startup, false positive 'ready' is returned")
 	})
 }
+
+func TestFillRuntimeDefaultsPreservesEnv(t *testing.T) {
+	t.Parallel()
+
+	t.Run("preserves Env from custom agent config", func(t *testing.T) {
+		// Regression test: fillRuntimeDefaults must preserve Env field
+		// This is critical for custom agents that use env vars for config
+		customConfig := &RuntimeConfig{
+			Command: "my-agent",
+			Args:    []string{"--flag"},
+			Env: map[string]string{
+				"CUSTOM_VAR":   "value",
+				"ANOTHER_VAR":  "another",
+				"JSON_VAR":     `{"key":"value"}`,
+			},
+		}
+
+		result := fillRuntimeDefaults(customConfig)
+
+		// Verify all env vars are preserved
+		if result.Env == nil {
+			t.Fatal("fillRuntimeDefaults lost Env map")
+		}
+		if len(result.Env) != 3 {
+			t.Errorf("fillRuntimeDefaults lost env vars: got %d, want 3", len(result.Env))
+		}
+		if result.Env["CUSTOM_VAR"] != "value" {
+			t.Errorf("CUSTOM_VAR = %q, want %q", result.Env["CUSTOM_VAR"], "value")
+		}
+		if result.Env["JSON_VAR"] != `{"key":"value"}` {
+			t.Errorf("JSON_VAR = %q, want %q", result.Env["JSON_VAR"], `{"key":"value"}`)
+		}
+	})
+
+	t.Run("does not mutate original config", func(t *testing.T) {
+		originalConfig := &RuntimeConfig{
+			Command: "my-agent",
+			Env: map[string]string{
+				"KEY": "original",
+			},
+		}
+
+		result := fillRuntimeDefaults(originalConfig)
+
+		// Modify the result's Env
+		result.Env["KEY"] = "modified"
+		result.Env["NEW_KEY"] = "new"
+
+		// Original should be unchanged
+		if originalConfig.Env["KEY"] != "original" {
+			t.Errorf("fillRuntimeDefaults mutated original: KEY = %q, want %q",
+				originalConfig.Env["KEY"], "original")
+		}
+		if _, exists := originalConfig.Env["NEW_KEY"]; exists {
+			t.Error("fillRuntimeDefaults mutated original: NEW_KEY should not exist")
+		}
+	})
+
+	t.Run("handles nil Env gracefully", func(t *testing.T) {
+		configNoEnv := &RuntimeConfig{
+			Command: "my-agent",
+			Args:    []string{"--flag"},
+			// Env is nil
+		}
+
+		result := fillRuntimeDefaults(configNoEnv)
+
+		// Should not create empty Env map, just leave it nil
+		if result.Env != nil && len(result.Env) > 0 {
+			t.Errorf("fillRuntimeDefaults created unexpected Env: %v", result.Env)
+		}
+	})
+}
