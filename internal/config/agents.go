@@ -43,6 +43,11 @@ type AgentPresetInfo struct {
 	// Args are the default command-line arguments for autonomous mode.
 	Args []string `json:"args"`
 
+	// Env are environment variables to set when starting the agent.
+	// These are merged with the standard GT_* variables.
+	// Used for agent-specific configuration like OPENCODE_PERMISSION.
+	Env map[string]string `json:"env,omitempty"`
+
 	// ProcessNames are the process names to look for when detecting if the agent is running.
 	// Used by tmux.IsAgentRunning to check pane_current_command.
 	// E.g., ["node"] for Claude, ["cursor-agent"] for Cursor.
@@ -180,14 +185,18 @@ var builtinPresets = map[AgentPreset]*AgentPresetInfo{
 		SupportsForkSession: false,
 	},
 	AgentOpenCode: {
-		Name:                AgentOpenCode,
-		Command:             "opencode",
-		Args:                []string{}, // OpenCode has no YOLO flag, runs autonomously by default
+		Name:    AgentOpenCode,
+		Command: "opencode",
+		Args:    []string{}, // No CLI flags needed, YOLO via OPENCODE_PERMISSION env
+		Env: map[string]string{
+			// Auto-approve all tool calls (equivalent to --dangerously-skip-permissions)
+			"OPENCODE_PERMISSION": `{"*":"allow"}`,
+		},
 		ProcessNames:        []string{"opencode", "node"}, // Runs as Node.js
-		SessionIDEnv:        "", // OpenCode manages sessions internally
-		ResumeFlag:          "", // No resume support yet
+		SessionIDEnv:        "",                           // OpenCode manages sessions internally
+		ResumeFlag:          "",                           // No resume support yet
 		ResumeStyle:         "",
-		SupportsHooks:       true, // Uses .opencode/plugin/gastown.js
+		SupportsHooks:       true,  // Uses .opencode/plugin/gastown.js
 		SupportsForkSession: false,
 		NonInteractive: &NonInteractiveConfig{
 			Subcommand: "run",
@@ -335,7 +344,7 @@ func DefaultAgentPreset() AgentPreset {
 }
 
 // RuntimeConfigFromPreset creates a RuntimeConfig from an agent preset.
-// This provides the basic Command/Args; additional fields from AgentPresetInfo
+// This provides the basic Command/Args/Env; additional fields from AgentPresetInfo
 // can be accessed separately for extended functionality.
 func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 	info := GetAgentPreset(preset)
@@ -344,9 +353,19 @@ func RuntimeConfigFromPreset(preset AgentPreset) *RuntimeConfig {
 		return DefaultRuntimeConfig()
 	}
 
+	// Copy Env map to avoid mutation
+	var envCopy map[string]string
+	if len(info.Env) > 0 {
+		envCopy = make(map[string]string, len(info.Env))
+		for k, v := range info.Env {
+			envCopy[k] = v
+		}
+	}
+
 	return &RuntimeConfig{
 		Command: info.Command,
 		Args:    append([]string(nil), info.Args...), // Copy to avoid mutation
+		Env:     envCopy,
 	}
 }
 
