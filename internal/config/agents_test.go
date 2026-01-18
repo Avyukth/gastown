@@ -536,9 +536,21 @@ func TestOpenCodeAgentPreset(t *testing.T) {
 		t.Errorf("opencode command = %q, want opencode", info.Command)
 	}
 
-	// OpenCode has no YOLO flag - it runs autonomously by default
+	// OpenCode uses OPENCODE_PERMISSION env var for yolo mode instead of CLI flag
 	if len(info.Args) != 0 {
-		t.Errorf("opencode args = %v, want empty (no YOLO flag needed)", info.Args)
+		t.Errorf("opencode args = %v, want empty (uses env var for yolo)", info.Args)
+	}
+
+	// Check OPENCODE_PERMISSION env var is set for yolo mode
+	if info.Env == nil {
+		t.Fatal("opencode Env is nil, expected OPENCODE_PERMISSION")
+	}
+	permValue, ok := info.Env["OPENCODE_PERMISSION"]
+	if !ok {
+		t.Error("opencode Env missing OPENCODE_PERMISSION")
+	}
+	if permValue != `{"*":"allow"}` {
+		t.Errorf("OPENCODE_PERMISSION = %q, want %q", permValue, `{"*":"allow"}`)
 	}
 
 	// Check ProcessNames includes both opencode and node (runs as Node.js)
